@@ -2,7 +2,9 @@ import { load } from "std/dotenv/mod.ts";
 
 export interface Config {
   botToken: string;
+  botId: string;
   previewBotToken?: string;
+  previewBotId?: string;
   webhookSecret: string;
   logLevel: "debug" | "info" | "error";
   environment: "development" | "production";
@@ -24,6 +26,15 @@ export function getConfig(): Config {
     throw new Error("BOT_TOKEN is required");
   }
 
+  // Parse bot ID from token
+  const botId = botToken.split(":")[0];
+  if (!botId) {
+    throw new Error("Invalid BOT_TOKEN format");
+  }
+
+  const previewBotToken = Deno.env.get("PREVIEW_BOT_TOKEN");
+  const previewBotId = previewBotToken ? previewBotToken.split(":")[0] : undefined;
+
   const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY");
   console.log("OPENROUTER_API_KEY exists:", !!openRouterApiKey);
   
@@ -33,7 +44,9 @@ export function getConfig(): Config {
 
   return {
     botToken,
-    previewBotToken: Deno.env.get("PREVIEW_BOT_TOKEN"),
+    botId,
+    previewBotToken,
+    previewBotId,
     webhookSecret: Deno.env.get("WEBHOOK_SECRET") || crypto.randomUUID(),
     logLevel: (Deno.env.get("LOG_LEVEL") || "info") as Config["logLevel"],
     environment: (Deno.env.get("ENVIRONMENT") || "development") as Config["environment"],

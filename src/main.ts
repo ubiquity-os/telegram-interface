@@ -1,13 +1,9 @@
 import { webhookCallback } from "grammy";
-import { createBot } from "./bot.ts";
+import { createBot, getBotTokenForDeployment } from "./bot-factory.ts";
 import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
 
-const bot = createBot();
 const config = getConfig();
-
-// Create webhook handler
-const handleUpdate = webhookCallback(bot, "std/http");
 
 Deno.serve({
   port: 8000,
@@ -165,9 +161,12 @@ Deno.serve({
         console.log(`Processing new update: ${update.update_id}`);
       }
       
+      // Get the hostname from the request to determine which bot to use
+      const hostname = url.hostname;
+      
       // Process the update asynchronously (don't await)
       // This allows us to return 200 OK immediately
-      processUpdateAsync(bodyText);
+      processUpdateAsync(bodyText, hostname);
       
       // Return 200 OK immediately to acknowledge webhook
       return new Response("OK", { status: 200 });
@@ -183,8 +182,17 @@ Deno.serve({
 });
 
 // Async function to process updates in the background
-async function processUpdateAsync(bodyText: string) {
+async function processUpdateAsync(bodyText: string, hostname: string) {
   try {
+    // Determine which bot token to use based on the hostname
+    const botToken = getBotTokenForDeployment(hostname);
+    
+    // Create the appropriate bot instance
+    const bot = createBot(botToken);
+    
+    // Create webhook handler for this specific bot
+    const handleUpdate = webhookCallback(bot, "std/http");
+    
     // Create a new request object with the body for grammy
     const fakeRequest = new Request("https://telegram.org", {
       method: "POST",
