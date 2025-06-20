@@ -144,7 +144,7 @@ function isValidToolName(name: string): boolean {
 /**
  * Formats a tool result back into a message format the LLM can understand
  */
-export function formatToolResult(toolName: string, result: any, error?: string): string {
+export function formatToolResult(toolName: string, result: any, error?: string, requiresUserResponse?: boolean): string {
   if (error) {
     return `<tool_result>
 <tool_name>${toolName}</tool_name>
@@ -153,9 +153,18 @@ export function formatToolResult(toolName: string, result: any, error?: string):
 </tool_result>`;
   }
 
-  return `<tool_result>
+  let resultXml = `<tool_result>
 <tool_name>${toolName}</tool_name>
-<status>success</status>
+<status>success</status>`;
+  
+  if (requiresUserResponse) {
+    resultXml += `
+<requires_user_response>true</requires_user_response>`;
+  }
+  
+  resultXml += `
 <output>${typeof result === 'string' ? result : JSON.stringify(result, null, 2)}</output>
 </tool_result>`;
+  
+  return resultXml;
 }

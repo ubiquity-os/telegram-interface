@@ -170,5 +170,10 @@ export function formatExecutionResult(toolName: string, result: ToolExecutionRes
     return formatToolResult(toolName, null, result.error);
   }
   
+  // Include requiresUserResponse flag if present
+  if (result.requiresUserResponse) {
+    return formatToolResult(toolName, result.result, undefined, result.requiresUserResponse);
+  }
+  
   return formatToolResult(toolName, result.result);
 }
