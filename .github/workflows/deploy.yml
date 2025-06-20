@@ -19,7 +19,6 @@ jobs:
         with:
           project: telegram-interface
           entrypoint: src/main.ts
-          token: ${{ secrets.DENO_DEPLOY_TOKEN }}
 
   preview:
     if: github.ref != 'refs/heads/main'
@@ -38,7 +37,6 @@ jobs:
         with:
           project: telegram-interface-preview
           entrypoint: src/main.ts
-          token: ${{ secrets.DENO_DEPLOY_TOKEN }}
 
       - name: Update preview webhook
         run: deno run --allow-net --allow-env scripts/update-preview-webhook.ts
