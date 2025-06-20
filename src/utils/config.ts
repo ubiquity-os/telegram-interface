@@ -5,6 +5,8 @@ export interface Config {
   webhookSecret: string;
   logLevel: "debug" | "info" | "error";
   environment: "development" | "production";
+  openRouterApiKey: string;
+  deploymentUrl?: string;
 }
 
 // Load .env file if it exists
@@ -18,10 +20,17 @@ export function getConfig(): Config {
     throw new Error("BOT_TOKEN is required");
   }
 
+  const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY");
+  if (!openRouterApiKey) {
+    throw new Error("OPENROUTER_API_KEY is required");
+  }
+
   return {
     botToken,
     webhookSecret: Deno.env.get("WEBHOOK_SECRET") || crypto.randomUUID(),
     logLevel: (Deno.env.get("LOG_LEVEL") || "info") as Config["logLevel"],
     environment: (Deno.env.get("ENVIRONMENT") || "development") as Config["environment"],
+    openRouterApiKey,
+    deploymentUrl: Deno.env.get("DEPLOYMENT_URL"),
   };
 }
