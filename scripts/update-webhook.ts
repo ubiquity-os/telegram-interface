@@ -1,51 +1,59 @@
 /// <reference types="deno-types" />
 import { getDeploymentUrl } from "./deno-deploy-api.ts";
 
-// Get environment variables
-const BOT_TOKEN = Deno.env.get("BOT_TOKEN");
-const WEBHOOK_SECRET = Deno.env.get("WEBHOOK_SECRET");
-const IS_PRODUCTION = Deno.env.get("IS_PRODUCTION") === "true";
+const DRY_RUN = Deno.args.includes("--dry-run");
 
-// Validate required environment variables
-if (!BOT_TOKEN) {
-  console.error("BOT_TOKEN environment variable is required");
+console.log("=== WEBHOOK UPDATE DEBUG ===");
+console.log("Dry run mode:", DRY_RUN);
+console.log("Environment variables:");
+console.log(`- IS_PRODUCTION: ${Deno.env.get("IS_PRODUCTION")}`);
+console.log(`- BOT_TOKEN: ${Deno.env.get("BOT_TOKEN") ? "*****" : "MISSING"}`);
+console.log(`- WEBHOOK_SECRET: ${Deno.env.get("WEBHOOK_SECRET") ? "*****" : "MISSING"}`);
+
+if (!Deno.env.get("BOT_TOKEN")) {
+  console.error("ERROR: BOT_TOKEN environment variable is required");
   Deno.exit(1);
 }
-if (!WEBHOOK_SECRET) {
-  console.error("WEBHOOK_SECRET environment variable is required");
+if (!Deno.env.get("WEBHOOK_SECRET")) {
+  console.error("ERROR: WEBHOOK_SECRET environment variable is required");
   Deno.exit(1);
 }
 
 try {
-  // Get deployment URL from Deno Deploy API
-  const deploymentUrl = await getDeploymentUrl(IS_PRODUCTION);
+  console.log("\nFetching deployment URL...");
+  const isProduction = Deno.env.get("IS_PRODUCTION") === "true";
+  const deploymentUrl = await getDeploymentUrl(isProduction);
+  console.log(`Resolved deployment URL: ${deploymentUrl}`);
   const webhookUrl = `${deploymentUrl}/webhook`;
 
-  console.log(`Setting webhook for ${IS_PRODUCTION ? "production" : "preview"} environment`);
-  console.log(`Webhook URL: ${webhookUrl}`);
+  if (DRY_RUN) {
+    console.log("\nDRY RUN RESULTS:");
+    console.log(`Would set ${isProduction ? "production" : "preview"} webhook to: ${webhookUrl}`);
+    console.log("Would use token:", Deno.env.get("BOT_TOKEN") ? "*****" : "MISSING");
+    console.log("Would use secret:", Deno.env.get("WEBHOOK_SECRET") ? "*****" : "MISSING");
+    Deno.exit(0);
+  }
 
-  // Set Telegram webhook
-  const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
+  console.log(`\nSetting ${isProduction ? "production" : "preview"} webhook...`);
+  const response = await fetch(`https://api.telegram.org/bot${Deno.env.get("BOT_TOKEN")}/setWebhook`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       url: webhookUrl,
-      secret_token: WEBHOOK_SECRET,
+      secret_token: Deno.env.get("WEBHOOK_SECRET"),
       drop_pending_updates: true,
     }),
   });
 
-  // Handle response
   if (!response.ok) {
     const error = await response.text();
+    console.error("ERROR:", error);
     throw new Error(`Failed to set webhook: ${response.status} ${error}`);
   }
 
-  const result = await response.json();
-  console.log("Webhook set successfully:", result.description);
+  const result = await response.json() as {ok: boolean, description: string};
+  console.log("\nSUCCESS:", result.description);
 } catch (error) {
-  console.error("Error setting webhook:", error);
+  console.error("\nFATAL ERROR:", error);
   Deno.exit(1);
 }
