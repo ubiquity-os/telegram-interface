@@ -8,6 +8,7 @@
   "imports": {
     "grammy": "https://deno.land/x/grammy@v1.21.1/mod.ts",
     "grammy/types": "https://deno.land/x/grammy@v1.21.1/types.ts",
-    "std/": "https://deno.land/std@0.213.0/"
+    "std/": "https://deno.land/std@0.213.0/",
+    "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@0.6.2"
   }
 }
