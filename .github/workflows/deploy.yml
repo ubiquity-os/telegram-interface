@@ -1,11 +1,15 @@
-name: Deploy
+name: Dual Bot Deployment
 
 on:
   push:
     branches:
       - main
     branches-ignore:
-      - main
+      - '!main'  # Only trigger on main for production
+
+  pull_request:
+    branches:
+      - '*'      # Trigger on all branches for preview
 
 jobs:
   production:
