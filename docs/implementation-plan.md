@@ -15,8 +15,8 @@
 
 ```bash
 # Create project directory
-mkdir telegram-bot
-cd telegram-bot
+mkdir telegram-interface
+cd telegram-interface
 
 # Create directory structure
 mkdir -p src/handlers src/middleware src/utils tests
@@ -225,7 +225,7 @@ jobs:
       - name: Deploy to Deno Deploy
         uses: denoland/deployctl@v1
         with:
-          project: telegram-bot
+          project: telegram-interface
           entrypoint: src/main.ts
 ```
 

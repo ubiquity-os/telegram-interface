@@ -35,13 +35,13 @@ This document outlines the architecture for a minimal Telegram chatbot designed 
 - Active maintenance and community
 
 **Alternative Considered:**
-- `telegram-bot-api`: Lower-level, more control but requires more boilerplate
+- `telegram-interface-api`: Lower-level, more control but requires more boilerplate
 - Direct Telegram API calls: Maximum flexibility but significant implementation overhead
 
 ### 3. Project Structure
 
 ```
-telegram-bot/
+telegram-interface/
 ├── deno.json              # Deno configuration
 ├── .env.example           # Example environment variables
 ├── .gitignore             # Git ignore file
