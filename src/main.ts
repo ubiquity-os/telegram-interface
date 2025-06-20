@@ -20,13 +20,130 @@ Deno.serve({
 
   // Health check endpoint
   if (url.pathname === "/health" && req.method === "GET") {
-    return new Response(JSON.stringify({ 
-      status: "ok", 
+    return new Response(JSON.stringify({
+      status: "ok",
       timestamp: new Date().toISOString(),
       deduplicationCacheSize: deduplicationService.getSize()
     }), {
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Conversations endpoint to view KV data
+  if (url.pathname === "/conversations" && req.method === "GET") {
+    try {
+      const params = url.searchParams;
+      const chatIdParam = params.get("chatId");
+      const limitParam = params.get("limit");
+      
+      // Dynamically import conversation history to avoid initialization issues
+      const { conversationHistory } = await import("./services/conversation-history.ts");
+      
+      // If specific chatId is requested
+      if (chatIdParam) {
+        const chatId = parseInt(chatIdParam);
+        if (isNaN(chatId)) {
+          return new Response(JSON.stringify({
+            error: "Invalid chatId parameter"
+          }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        
+        const history = await conversationHistory.getHistory(chatId);
+        const { countTokens } = await import("./utils/token-counter.ts");
+        
+        // Calculate total tokens for this conversation
+        let totalTokens = 0;
+        for (const msg of history) {
+          totalTokens += countTokens(msg.content);
+        }
+        
+        return new Response(JSON.stringify({
+          chatId,
+          messageCount: history.length,
+          totalTokens,
+          messages: history,
+          timestamp: new Date().toISOString()
+        }, null, 2), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      
+      // Get all conversations
+      const kv = await Deno.openKv();
+      const conversations: any[] = [];
+      const limit = limitParam ? parseInt(limitParam) : undefined;
+      let count = 0;
+      
+      // Iterate through all chat entries
+      const iter = kv.list({ prefix: ["chat"] });
+      for await (const entry of iter) {
+        if (entry.key[2] === "messages" && entry.value) {
+          const chatId = entry.key[1];
+          const messages = entry.value as any[];
+          
+          // Apply limit if specified
+          if (limit && count >= limit) break;
+          
+          // Calculate tokens for this conversation
+          const { countTokens } = await import("./utils/token-counter.ts");
+          let totalTokens = 0;
+          for (const entry of messages) {
+            totalTokens += countTokens(entry.message.content);
+          }
+          
+          conversations.push({
+            chatId,
+            messageCount: messages.length,
+            totalTokens,
+            firstMessageTime: messages[0]?.timestamp ? new Date(messages[0].timestamp).toISOString() : null,
+            lastMessageTime: messages[messages.length - 1]?.timestamp ? new Date(messages[messages.length - 1].timestamp).toISOString() : null,
+            // Include actual messages if not too many
+            messages: messages.length <= 10 ? messages : `[${messages.length} messages - use ?chatId=${chatId} to view all]`
+          });
+          
+          count++;
+        }
+      }
+      
+      // Get overall stats
+      const stats = await conversationHistory.getStats();
+      
+      return new Response(JSON.stringify({
+        stats: {
+          totalChats: stats.totalChats,
+          totalMessages: stats.totalMessages,
+          timestamp: new Date().toISOString()
+        },
+        conversations: conversations.sort((a, b) => {
+          // Sort by last message time, newest first
+          const timeA = a.lastMessageTime ? new Date(a.lastMessageTime).getTime() : 0;
+          const timeB = b.lastMessageTime ? new Date(b.lastMessageTime).getTime() : 0;
+          return timeB - timeA;
+        }),
+        queryParams: {
+          available: ["chatId", "limit"],
+          examples: [
+            "/conversations?chatId=123456789",
+            "/conversations?limit=5"
+          ]
+        }
+      }, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+      
+    } catch (error) {
+      console.error("Conversations endpoint error:", error);
+      return new Response(JSON.stringify({
+        error: "Failed to retrieve conversation data",
+        details: error.message
+      }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   }
 
   // Webhook endpoint
