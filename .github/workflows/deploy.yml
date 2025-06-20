@@ -30,8 +30,8 @@ jobs:
           project: telegram-interface
           entrypoint: src/main.ts
           root: "."
-          include: ["**"]
-          exclude: ["**.spec.ts"]
+          include: "**"
+          exclude: "**.spec.ts"
 
       - name: Update webhook
         run: deno run --allow-net --allow-env scripts/update-webhook.ts
