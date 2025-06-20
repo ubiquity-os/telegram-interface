@@ -31,7 +31,7 @@ jobs:
           https://api.deno.com/v1/projects/UbiquityOS/telegram-interface | jq .
 
       - name: Deploy
-        uses: denoland/deployctl@v1.13.1
+        uses: denoland/deployctl@1.13.1
         with:
           project: UbiquityOS/telegram-interface
           entrypoint: src/main.ts
