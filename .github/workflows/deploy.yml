@@ -27,7 +27,7 @@ jobs:
       - name: Verify Token Access (Personal)
         run: |
           echo "Verifying personal token access to project..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.PERSONAL_DENO_TOKEN }}" \
+          response=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
           https://dash.deno.com/api/projects/telegram-interface)
           
           if [ "$response" -eq 200 ]; then
