@@ -39,20 +39,21 @@ This workflow runs automatically when you push to any branch except `main`:
 - `DENO_DEPLOY_TOKEN` must be set in GitHub secrets
 - Your Deno Deploy project name must be `telegram-interface` (or update the workflow)
 
-### 2. Manual Workflow (`update-preview-webhook-simple.yml`)
+### 2. Webhook-based Workflow (`deno-deploy-webhook.yml`)
 
-This workflow can be triggered manually from GitHub Actions tab:
+This workflow is triggered by Deno Deploy webhooks when deployments complete. It's more reliable than polling the API.
 
-1. Go to Actions tab in your repository
-2. Select "Update Preview Bot Webhook (Simple)"
-3. Click "Run workflow"
-4. Enter your preview URL (e.g., `https://telegram-interface-abc123.deno.dev`)
-5. Click "Run workflow"
+To use this workflow:
+1. Set up a webhook in your Deno Deploy project (see "Alternative: Deno Deploy Webhook Integration" below)
+2. The workflow will automatically run when Deno Deploy sends a webhook notification
 
-This is useful when:
-- You don't have a Deno Deploy token
-- The automatic workflow fails
-- You want to manually control when webhooks are updated
+### 3. Manual Script
+
+If the automatic workflows don't work for your setup, you can always use the manual script:
+
+```bash
+./scripts/switch-to-preview.ts https://telegram-interface-abc123.deno.dev
+```
 
 ## Workflow Usage
 
@@ -74,8 +75,8 @@ Once configured, the workflow will:
 If automatic updates fail or you prefer manual control:
 
 1. Get your preview URL from Deno Deploy dashboard
-2. Go to GitHub Actions → "Update Preview Bot Webhook (Simple)"
-3. Run workflow with the preview URL
+2. Use the local script: `./scripts/switch-to-preview.ts https://your-preview-url.deno.dev`
+3. Or set up Deno Deploy webhooks for automatic updates
 
 ## Troubleshooting
 
