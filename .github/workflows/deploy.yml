@@ -4,6 +4,11 @@ on:
   push:
     branches: ['**']  # Trigger on all branches
 
+# Add permissions at the workflow level
+permissions:
+  id-token: write  # Required for OIDC token authentication
+  contents: read   # Required for actions/checkout
+
 jobs:
   production:
     if: github.ref == 'refs/heads/main'
