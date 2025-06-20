@@ -1,200 +1,135 @@
-// Get webhook-specific config directly from environment
-// No need to load .env file in CI/CD environment
-const config = {
-  botToken: Deno.env.get("BOT_TOKEN") || "",
-  previewBotToken: Deno.env.get("PREVIEW_BOT_TOKEN") || "",
-  webhookSecret: Deno.env.get("WEBHOOK_SECRET") || "",
-};
+// Manage webhooks for both production and preview bots
 
-// Validate required webhook config
-if (!config.botToken) {
-  console.error("❌ BOT_TOKEN is required");
+const productionToken = Deno.env.get("BOT_TOKEN") || "";
+const previewToken = Deno.env.get("PREVIEW_BOT_TOKEN") || "";
+const webhookSecret = Deno.env.get("WEBHOOK_SECRET") || "";
+
+if (!productionToken || !webhookSecret) {
+  console.error("❌ BOT_TOKEN and WEBHOOK_SECRET are required");
   Deno.exit(1);
 }
 
-if (!config.webhookSecret) {
-  console.error("❌ WEBHOOK_SECRET is required");
-  Deno.exit(1);
-}
-
-// Bot configurations
-const BOTS = {
-  production: {
-    name: "Production Bot",
-    token: config.botToken,
-    defaultUrl: "https://telegram-interface.deno.dev"
-  },
-  preview: {
-    name: "Preview Bot", 
-    token: config.previewBotToken,
-    defaultUrl: null // Will be provided as argument
-  }
-};
-
-// Parse command line arguments
 const command = Deno.args[0];
-const botType = Deno.args[1] as "production" | "preview";
-const deploymentUrl = Deno.args[2];
 
-// Show usage
-function showUsage() {
-  console.log(`
-📋 Webhook Manager for Telegram Bots
-
-Usage:
-  deno run --allow-net --allow-env scripts/manage-webhooks.ts <command> <bot> [url]
-
-Commands:
-  set       Set webhook for a bot
-  check     Check current webhook status
-  clear     Clear webhook (switch to polling mode)
-
-Bots:
-  production  Main production bot
-  preview     Preview/testing bot
-
-Examples:
-  # Set preview bot to a preview deployment
-  deno run --allow-net --allow-env scripts/manage-webhooks.ts set preview https://telegram-interface-69bz2rgywb7m.deno.dev
-
-  # Check production bot webhook
-  deno run --allow-net --allow-env scripts/manage-webhooks.ts check production
-
-  # Clear preview bot webhook (for local testing with polling)
-  deno run --allow-net --allow-env scripts/manage-webhooks.ts clear preview
-`);
-}
-
-// Validate inputs
-if (!command || !botType) {
-  showUsage();
+if (!command || !["set", "check", "delete"].includes(command)) {
+  console.log("Usage: deno run --allow-net --allow-env scripts/manage-webhooks.ts [set|check|delete] [deployment-url]");
+  console.log("\nCommands:");
+  console.log("  set <deployment-url>  - Set webhooks for both bots");
+  console.log("  check                 - Check current webhook status");
+  console.log("  delete                - Delete webhooks for both bots");
   Deno.exit(1);
 }
 
-if (!["set", "check", "clear"].includes(command)) {
-  console.error("❌ Invalid command. Use 'set', 'check', or 'clear'");
-  showUsage();
-  Deno.exit(1);
-}
-
-if (!["production", "preview"].includes(botType)) {
-  console.error("❌ Invalid bot type. Use 'production' or 'preview'");
-  showUsage();
-  Deno.exit(1);
-}
-
-const bot = BOTS[botType];
-
-// Check if preview bot token is configured
-if (botType === "preview" && !bot.token) {
-  console.error("❌ PREVIEW_BOT_TOKEN is not configured in your .env file");
-  console.error("Please add: PREVIEW_BOT_TOKEN=your_preview_bot_token_here");
-  Deno.exit(1);
-}
-
-const webhookSecret = config.webhookSecret;
-
-// Set webhook
-async function setWebhook(url: string) {
-  const webhookUrl = `${url}/webhook/${webhookSecret}`;
+// Helper function to manage webhook
+async function manageWebhook(token: string, action: string, webhookPath?: string, botName?: string) {
+  let url = `https://api.telegram.org/bot${token}/`;
   
-  console.log(`🔄 Setting webhook for ${bot.name}...`);
-  console.log(`📍 Webhook URL: ${webhookUrl}`);
+  switch (action) {
+    case "set":
+      if (!webhookPath) {
+        console.error("Webhook URL is required for set action");
+        return;
+      }
+      url += "setWebhook";
+      break;
+    case "check":
+      url += "getWebhookInfo";
+      break;
+    case "delete":
+      url += "deleteWebhook";
+      break;
+  }
   
-  const response = await fetch(
-    `https://api.telegram.org/bot${bot.token}/setWebhook`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: webhookUrl,
-        drop_pending_updates: true,
-      }),
-    }
-  );
+  const options: RequestInit = {
+    method: action === "check" ? "GET" : "POST",
+  };
   
+  if (action === "set" && webhookPath) {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify({
+      url: webhookPath,
+      allowed_updates: ["message", "callback_query"],
+    });
+  }
+  
+  const response = await fetch(url, options);
   const result = await response.json();
   
+  console.log(`\n${botName || "Bot"} - ${action}:`);
   if (result.ok) {
-    console.log(`✅ Webhook successfully set for ${bot.name}!`);
-    await checkWebhook();
-  } else {
-    console.error(`❌ Failed to set webhook for ${bot.name}:`, result);
-    Deno.exit(1);
-  }
-}
-
-// Check webhook status
-async function checkWebhook() {
-  console.log(`\n📊 Checking webhook status for ${bot.name}...\n`);
-  
-  try {
-    const response = await fetch(
-      `https://api.telegram.org/bot${bot.token}/getWebhookInfo`
-    );
-    
-    const data = await response.json();
-    
-    if (data.ok) {
-      console.log(`✅ ${bot.name} Webhook Status:`);
-      console.log(`- URL: ${data.result.url || "Not set"}`);
-      console.log(`- Pending updates: ${data.result.pending_update_count || 0}`);
-      console.log(`- Max connections: ${data.result.max_connections || 40}`);
-      console.log(`- Last error: ${data.result.last_error_message || "None"}`);
-      if (data.result.last_error_date) {
-        console.log(`- Last error date: ${new Date(data.result.last_error_date * 1000).toISOString()}`);
+    if (action === "check" && result.result) {
+      console.log(`✅ Webhook URL: ${result.result.url || "Not set"}`);
+      if (result.result.pending_update_count) {
+        console.log(`   Pending updates: ${result.result.pending_update_count}`);
+      }
+      if (result.result.last_error_message) {
+        console.log(`   ⚠️  Last error: ${result.result.last_error_message}`);
       }
     } else {
-      console.error(`❌ Failed to get webhook info for ${bot.name}:`, data);
+      console.log(`✅ Success`);
     }
-  } catch (error) {
-    console.error(`❌ Error checking webhook for ${bot.name}:`, error);
-  }
-}
-
-// Clear webhook
-async function clearWebhook() {
-  console.log(`🔄 Clearing webhook for ${bot.name}...`);
-  
-  const response = await fetch(
-    `https://api.telegram.org/bot${bot.token}/deleteWebhook`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        drop_pending_updates: true,
-      }),
-    }
-  );
-  
-  const result = await response.json();
-  
-  if (result.ok) {
-    console.log(`✅ Webhook cleared for ${bot.name}!`);
-    console.log("ℹ️  Bot can now be used with polling mode for local testing");
   } else {
-    console.error(`❌ Failed to clear webhook for ${bot.name}:`, result);
-    Deno.exit(1);
+    console.error(`❌ Failed:`, result);
   }
+  
+  return result;
 }
 
 // Execute command
 switch (command) {
-  case "set":
-    const url = deploymentUrl || bot.defaultUrl;
-    if (!url) {
-      console.error("❌ Please provide a deployment URL for the preview bot");
-      showUsage();
+  case "set": {
+    const deploymentUrl = Deno.args[1];
+    if (!deploymentUrl) {
+      console.error("❌ Deployment URL is required for set command");
+      console.log("Example: deno run --allow-net --allow-env scripts/manage-webhooks.ts set https://telegram-interface.deno.dev");
       Deno.exit(1);
     }
-    await setWebhook(url);
-    break;
     
-  case "check":
-    await checkWebhook();
-    break;
+    console.log(`Setting webhooks for deployment: ${deploymentUrl}`);
     
-  case "clear":
-    await clearWebhook();
+    // Set production webhook
+    await manageWebhook(
+      productionToken,
+      "set",
+      `${deploymentUrl}/webhook/${webhookSecret}`,
+      "Production Bot"
+    );
+    
+    // Set preview webhook if token exists
+    if (previewToken) {
+      await manageWebhook(
+        previewToken,
+        "set",
+        `${deploymentUrl}/webhook-preview/${webhookSecret}`,
+        "Preview Bot"
+      );
+    } else {
+      console.log("\n⚠️  Preview bot token not configured");
+    }
     break;
+  }
+  
+  case "check": {
+    // Check production webhook
+    await manageWebhook(productionToken, "check", undefined, "Production Bot");
+    
+    // Check preview webhook if token exists
+    if (previewToken) {
+      await manageWebhook(previewToken, "check", undefined, "Preview Bot");
+    }
+    break;
+  }
+  
+  case "delete": {
+    // Delete production webhook
+    await manageWebhook(productionToken, "delete", undefined, "Production Bot");
+    
+    // Delete preview webhook if token exists
+    if (previewToken) {
+      await manageWebhook(previewToken, "delete", undefined, "Preview Bot");
+    }
+    break;
+  }
 }
+
+console.log("\n✅ Done!");

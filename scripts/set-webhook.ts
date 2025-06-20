@@ -1,60 +1,58 @@
-import { getConfig } from "../src/utils/config.ts";
+// Set webhook for Telegram bot
 
-const config = getConfig();
+const botToken = Deno.env.get("BOT_TOKEN");
+const previewBotToken = Deno.env.get("PREVIEW_BOT_TOKEN");
+const webhookSecret = Deno.env.get("WEBHOOK_SECRET");
+const deploymentUrl = Deno.env.get("DEPLOYMENT_URL");
 
-// Get deployment URL from command line argument
-const deploymentUrl = Deno.args[0];
+if (!botToken || !webhookSecret) {
+  console.error("BOT_TOKEN and WEBHOOK_SECRET are required");
+  Deno.exit(1);
+}
 
 if (!deploymentUrl) {
-  console.error("❌ Error: Please provide your Deno Deploy URL as an argument");
-  console.error("Usage: deno run --allow-net --allow-env scripts/set-webhook.ts https://your-project.deno.dev");
+  console.error("DEPLOYMENT_URL is required");
   Deno.exit(1);
 }
 
-// Validate URL format
-try {
-  new URL(deploymentUrl);
-} catch {
-  console.error("❌ Error: Invalid URL format. Please provide a valid URL like https://your-project.deno.dev");
-  Deno.exit(1);
-}
-
-const webhookUrl = `${deploymentUrl}/webhook/${config.webhookSecret}`;
-
-console.log("🔄 Setting webhook for Telegram bot...");
-console.log(`📍 Webhook URL: ${webhookUrl}`);
-
-const response = await fetch(
-  `https://api.telegram.org/bot${config.botToken}/setWebhook`,
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      url: webhookUrl,
-      drop_pending_updates: true,
-    }),
-  }
-);
-
-const result = await response.json();
-
-if (result.ok) {
-  console.log("✅ Webhook successfully set!");
-  console.log("📋 Details:", result);
+// Function to set webhook for a bot
+async function setWebhook(token: string, webhookPath: string, botName: string) {
+  const webhookUrl = `${deploymentUrl}${webhookPath}`;
   
-  // Get webhook info to verify
-  const infoResponse = await fetch(
-    `https://api.telegram.org/bot${config.botToken}/getWebhookInfo`
+  console.log(`\nSetting webhook for ${botName}...`);
+  console.log(`Webhook URL: ${webhookUrl}`);
+  
+  const response = await fetch(
+    `https://api.telegram.org/bot${token}/setWebhook`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: webhookUrl,
+        allowed_updates: ["message", "callback_query"],
+      }),
+    }
   );
-  const info = await infoResponse.json();
+
+  const result = await response.json();
   
-  if (info.ok) {
-    console.log("\n📊 Current webhook info:");
-    console.log(`- URL: ${info.result.url}`);
-    console.log(`- Pending updates: ${info.result.pending_update_count || 0}`);
-    console.log(`- Last error: ${info.result.last_error_message || "None"}`);
+  if (result.ok) {
+    console.log(`✅ Webhook set successfully for ${botName}`);
+  } else {
+    console.error(`❌ Failed to set webhook for ${botName}:`, result);
   }
-} else {
-  console.error("❌ Failed to set webhook:", result);
-  Deno.exit(1);
+  
+  return result;
 }
+
+// Set webhook for production bot
+await setWebhook(botToken, `/webhook/${webhookSecret}`, "Production Bot");
+
+// Set webhook for preview bot if configured
+if (previewBotToken) {
+  await setWebhook(previewBotToken, `/webhook-preview/${webhookSecret}`, "Preview Bot");
+} else {
+  console.log("\n⚠️  Preview bot token not configured, skipping preview webhook setup");
+}
+
+console.log("\n✅ Webhook setup complete!");

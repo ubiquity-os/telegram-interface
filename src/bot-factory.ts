@@ -30,31 +30,26 @@ export function createBot(botToken: string): Bot {
   return bot;
 }
 
-export function getBotForUpdate(update: any): Bot {
+// Determine which bot to use based on which webhook received the update
+export function getBotForWebhook(webhookPath: string): Bot {
   const config = getConfig();
   
-  // Try to detect which bot this update is for
-  // Check various fields that might contain bot information
+  // The key insight: each bot has its own webhook registered
+  // So we know which bot based on which webhook endpoint received the request
   
-  // For messages with bot commands
-  if (update.message?.text?.includes("@")) {
-    const match = update.message.text.match(/@(\w+)bot/i);
-    if (match) {
-      const username = match[1];
-      // You could match username, but for now we'll use other methods
-    }
-  }
+  // Since both deployments use the same webhook path structure,
+  // we need to know which deployment received it
+  // This is why we need to check the hostname
   
-  // For inline queries, callback queries, etc., we might have bot info
-  // But the most reliable way is to check which deployment received the webhook
+  // But actually, the better approach is to have different webhook secrets
+  // or to encode the bot info in the webhook path itself
   
-  // Since we can't easily determine from the update alone,
-  // we'll need to pass additional context from the webhook handler
-  // For now, return the default bot
+  // For now, we'll need the hostname to determine which bot to use
   return createBot(config.botToken);
 }
 
 // Helper to determine which bot token to use based on deployment
+// This is needed because Telegram doesn't send bot info in the update
 export function getBotTokenForDeployment(hostname?: string): string {
   const config = getConfig();
   
@@ -62,7 +57,7 @@ export function getBotTokenForDeployment(hostname?: string): string {
   console.log(`Production bot ID: ${config.botId}`);
   console.log(`Preview bot ID: ${config.previewBotId || "not configured"}`);
   
-  // If we have a hostname, check if it's a preview deployment
+  // Check if this is a preview deployment
   if (hostname && !hostname.includes("telegram-interface.deno.dev")) {
     // This is a preview deployment
     if (config.previewBotToken) {

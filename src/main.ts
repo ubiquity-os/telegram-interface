@@ -9,7 +9,10 @@ Deno.serve({
   port: 8000,
   onListen: ({ hostname, port }) => {
     console.log(`Webhook server running at http://${hostname}:${port}`);
-    console.log(`Webhook path: /webhook/${config.webhookSecret}`);
+    console.log(`Production webhook: /webhook/${config.webhookSecret}`);
+    if (config.previewBotToken) {
+      console.log(`Preview webhook: /webhook-preview/${config.webhookSecret}`);
+    }
   },
 }, async (req) => {
   const url = new URL(req.url);
@@ -142,8 +145,11 @@ Deno.serve({
     }
   }
 
-  // Webhook endpoint
-  if (url.pathname === `/webhook/${config.webhookSecret}` && req.method === "POST") {
+  // Webhook endpoints - different paths for each bot
+  const isProductionWebhook = url.pathname === `/webhook/${config.webhookSecret}`;
+  const isPreviewWebhook = url.pathname === `/webhook-preview/${config.webhookSecret}`;
+  
+  if ((isProductionWebhook || isPreviewWebhook) && req.method === "POST") {
     try {
       // Parse the update to check for duplicates
       const bodyText = await req.text();
@@ -161,12 +167,14 @@ Deno.serve({
         console.log(`Processing new update: ${update.update_id}`);
       }
       
-      // Get the hostname from the request to determine which bot to use
-      const hostname = url.hostname;
+      // Determine which bot to use based on the webhook path
+      const botToken = isProductionWebhook ? config.botToken : config.previewBotToken!;
+      const botType = isProductionWebhook ? "PRODUCTION" : "PREVIEW";
+      console.log(`📍 Webhook received on ${botType} endpoint`);
       
       // Process the update asynchronously (don't await)
       // This allows us to return 200 OK immediately
-      processUpdateAsync(bodyText, hostname);
+      processUpdateAsync(bodyText, botToken, botType);
       
       // Return 200 OK immediately to acknowledge webhook
       return new Response("OK", { status: 200 });
@@ -182,10 +190,9 @@ Deno.serve({
 });
 
 // Async function to process updates in the background
-async function processUpdateAsync(bodyText: string, hostname: string) {
+async function processUpdateAsync(bodyText: string, botToken: string, botType: string) {
   try {
-    // Determine which bot token to use based on the hostname
-    const botToken = getBotTokenForDeployment(hostname);
+    console.log(`🤖 Processing update with ${botType} bot`);
     
     // Create the appropriate bot instance
     const bot = createBot(botToken);
