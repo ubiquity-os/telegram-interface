@@ -24,10 +24,10 @@ jobs:
         with:
           deno-version: v1.43.0
 
-      - name: Verify Token Access
+      - name: Verify Token Access (Personal)
         run: |
-          echo "Verifying token access to project..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
+          echo "Verifying personal token access to project..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.PERSONAL_DENO_TOKEN }}" \
           https://dash.deno.com/api/projects/telegram-interface)
           
           if [ "$response" -eq 200 ]; then
@@ -40,7 +40,7 @@ jobs:
       - name: Deploy
         uses: denoland/deployctl@1.13.1
         with:
-          project: UbiquityOS/telegram-interface
+          project: telegram-interface
           entrypoint: src/main.ts
           root: "."
           include: "**"
