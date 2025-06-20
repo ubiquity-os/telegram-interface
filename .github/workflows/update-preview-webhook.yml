@@ -1,0 +1,144 @@
+name: Update Preview Bot Webhook
+
+on:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  update-webhook:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      
+      - name: Wait for Deno Deploy
+        run: |
+          echo "Waiting for Deno Deploy to create preview deployment..."
+          sleep 30  # Give Deno Deploy time to create the preview
+      
+      - name: Get Deno Deploy Preview URL
+        id: get-preview-url
+        run: |
+          # Extract project name from deno.json or use default
+          PROJECT_NAME="telegram-interface"
+          
+          # Get branch name
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          echo "Branch: $BRANCH_NAME"
+          
+          # Deno Deploy preview URLs follow a pattern, but we need to fetch the exact URL
+          # For now, we'll construct it based on common patterns
+          # You may need to adjust this based on your Deno Deploy project settings
+          
+          # Try to get the deployment URL from Deno Deploy API
+          # Note: This requires DENO_DEPLOY_TOKEN to be set in GitHub secrets
+          if [ -n "${{ secrets.DENO_DEPLOY_TOKEN }}" ]; then
+            echo "Fetching deployment info from Deno Deploy API..."
+            
+            # Get latest deployment for the branch
+            DEPLOYMENT_INFO=$(curl -s -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
+              "https://api.deno.com/v1/projects/${PROJECT_NAME}/deployments?limit=1&branch=${BRANCH_NAME}")
+            
+            PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r '.items[0].url // empty')
+            
+            if [ -n "$PREVIEW_URL" ]; then
+              echo "Found preview URL from API: $PREVIEW_URL"
+              echo "preview_url=$PREVIEW_URL" >> $GITHUB_OUTPUT
+            else
+              echo "Could not fetch preview URL from API, will wait and retry..."
+              sleep 30
+              
+              # Retry once more
+              DEPLOYMENT_INFO=$(curl -s -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
+                "https://api.deno.com/v1/projects/${PROJECT_NAME}/deployments?limit=1&branch=${BRANCH_NAME}")
+              
+              PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r '.items[0].url // empty')
+              
+              if [ -n "$PREVIEW_URL" ]; then
+                echo "Found preview URL from API: $PREVIEW_URL"
+                echo "preview_url=$PREVIEW_URL" >> $GITHUB_OUTPUT
+              else
+                echo "Failed to get preview URL from API"
+                exit 1
+              fi
+            fi
+          else
+            echo "DENO_DEPLOY_TOKEN not set, cannot fetch preview URL automatically"
+            echo "Please set DENO_DEPLOY_TOKEN in your GitHub repository secrets"
+            exit 1
+          fi
+      
+      - name: Update Preview Bot Webhook
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+        run: |
+          if [ -z "$PREVIEW_BOT_TOKEN" ]; then
+            echo "Error: PREVIEW_BOT_TOKEN secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$WEBHOOK_SECRET" ]; then
+            echo "Error: WEBHOOK_SECRET secret is not set"
+            exit 1
+          fi
+          
+          PREVIEW_URL="${{ steps.get-preview-url.outputs.preview_url }}"
+          
+          if [ -z "$PREVIEW_URL" ]; then
+            echo "Error: Could not determine preview URL"
+            exit 1
+          fi
+          
+          echo "Setting webhook for preview bot to: $PREVIEW_URL"
+          
+          # Run the webhook update script
+          deno run --allow-net --allow-env --allow-read \
+            scripts/manage-webhooks.ts set preview "$PREVIEW_URL"
+      
+      - name: Verify Webhook
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+        run: |
+          echo "Verifying webhook was set correctly..."
+          deno run --allow-net --allow-env --allow-read \
+            scripts/manage-webhooks.ts check preview
+      
+      - name: Comment on PR (if exists)
+        if: github.event_name == 'pull_request' || github.event.pull_request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const preview_url = '${{ steps.get-preview-url.outputs.preview_url }}';
+            const body = `🚀 **Preview Deployment Ready!**\n\n` +
+                        `Your preview bot has been updated to use the latest deployment:\n` +
+                        `🔗 ${preview_url}\n\n` +
+                        `You can now test your changes using the preview bot on Telegram.`;
+            
+            // Find PR number
+            const branch = context.ref.replace('refs/heads/', '');
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branch}`,
+              state: 'open'
+            });
+            
+            if (prs.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prs[0].number,
+                body: body
+              });
+            }

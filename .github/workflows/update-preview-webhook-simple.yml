@@ -1,0 +1,56 @@
+name: Update Preview Bot Webhook (Simple)
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_url:
+        description: 'Deno Deploy Preview URL'
+        required: true
+        type: string
+
+jobs:
+  update-webhook:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      
+      - name: Update Preview Bot Webhook
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+        run: |
+          if [ -z "$PREVIEW_BOT_TOKEN" ]; then
+            echo "Error: PREVIEW_BOT_TOKEN secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "$WEBHOOK_SECRET" ]; then
+            echo "Error: WEBHOOK_SECRET secret is not set"
+            exit 1
+          fi
+          
+          PREVIEW_URL="${{ inputs.preview_url }}"
+          
+          echo "Setting webhook for preview bot to: $PREVIEW_URL"
+          
+          # Run the webhook update script
+          deno run --allow-net --allow-env --allow-read \
+            scripts/manage-webhooks.ts set preview "$PREVIEW_URL"
+      
+      - name: Verify Webhook
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+        run: |
+          echo "Verifying webhook was set correctly..."
+          deno run --allow-net --allow-env --allow-read \
+            scripts/manage-webhooks.ts check preview

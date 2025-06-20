@@ -10,6 +10,9 @@ A minimal Telegram bot built with Grammy and designed to run on Deno Deploy. The
 - Automatic deployment via GitHub Actions
 - Health check endpoint
 - Request logging middleware
+- AI-powered responses via OpenRouter
+- MCP (Model Context Protocol) tool integration
+- Automatic preview bot webhook updates for testing
 
 ## Project Structure
 
@@ -96,38 +99,27 @@ Set these in your Deno Deploy project dashboard:
 
 The project is configured for automatic deployment via GitHub Actions. Simply push to the `main` branch and the bot will be deployed automatically.
 
-### Manual Webhook Setup
+### Webhook Setup
 
-After deployment, you need to register the webhook with Telegram. Create a file `scripts/set-webhook.ts`:
-
-```typescript
-import { getConfig } from "../src/utils/config.ts";
-
-const config = getConfig();
-const baseUrl = "https://your-project.deno.dev"; // Replace with your Deno Deploy URL
-const webhookUrl = `${baseUrl}/webhook/${config.webhookSecret}`;
-
-const response = await fetch(
-  `https://api.telegram.org/bot${config.botToken}/setWebhook`,
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      url: webhookUrl,
-      drop_pending_updates: true,
-    }),
-  }
-);
-
-const result = await response.json();
-console.log("Webhook setup result:", result);
-```
-
-Run it with:
+Use the provided webhook management scripts:
 
 ```bash
-deno run --allow-net --allow-env scripts/set-webhook.ts
+# Set webhook for production bot
+deno run --allow-net --allow-env scripts/set-webhook.ts https://your-project.deno.dev
+
+# Check webhook status
+deno run --allow-net --allow-env --allow-read scripts/manage-webhooks.ts check production
 ```
+
+### Preview Testing
+
+The project supports automatic preview deployments with a dedicated test bot:
+
+1. Add `PREVIEW_BOT_TOKEN` to your `.env` file
+2. Push to a non-main branch
+3. Use GitHub Actions or manual scripts to update the preview bot webhook
+
+See [Preview Testing Guide](docs/preview-testing-guide.md) and [GitHub Actions Setup](docs/github-actions-setup.md) for details.
 
 ## API Endpoints
 
