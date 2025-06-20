@@ -39,6 +39,8 @@ jobs:
 
       - name: Deploy
         uses: denoland/deployctl@1.13.1
+        env:
+          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
         with:
           project: telegram-interface
           entrypoint: src/main.ts
