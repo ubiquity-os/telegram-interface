@@ -1,35 +1,42 @@
 import { callOpenRouter } from "./call-openrouter.ts";
 import { OpenRouterMessage } from "./openrouter-types.ts";
+import { conversationHistory } from "./conversation-history.ts";
+import { countTokens } from "../utils/token-counter.ts";
 
-const PRIMARY_MODEL = "deepseek/deepseek-r1-0528:free";
-const FALLBACK_MODEL = "deepseek/deepseek-chat-v3-0324:free";
+const MODEL = "deepseek/deepseek-r1-0528:free";
+const MAX_CONTEXT_TOKENS = 64000; // 64k tokens for context, leaving plenty for response
 
-export async function getAIResponse(userMessage: string): Promise<string> {
-  const messages: OpenRouterMessage[] = [
-    {
-      role: "system",
-      content: "You are a helpful AI assistant in a Telegram bot. Provide concise, helpful responses to user messages. Keep responses under 4000 characters to fit Telegram's message limits."
-    },
-    {
-      role: "user",
-      content: userMessage,
-    },
-  ];
+export async function getAIResponse(userMessage: string, chatId: number): Promise<string> {
+  const systemPrompt: OpenRouterMessage = {
+    role: "system",
+    content: "You are a helpful AI assistant in a Telegram bot. Provide concise, helpful responses to user messages. Keep responses under 4000 characters to fit Telegram's message limits."
+  };
 
-  try {
-    // Try primary model first
-    console.log(`Calling OpenRouter with primary model: ${PRIMARY_MODEL}`);
-    return await callOpenRouter(messages, PRIMARY_MODEL);
-  } catch (primaryError) {
-    console.error("Primary model failed:", primaryError);
-    
-    // Fallback to secondary model
-    try {
-      console.log(`Falling back to secondary model: ${FALLBACK_MODEL}`);
-      return await callOpenRouter(messages, FALLBACK_MODEL);
-    } catch (fallbackError) {
-      console.error("Fallback model also failed:", fallbackError);
-      throw new Error("Both AI models failed to respond");
-    }
-  }
+  const userMessageObj: OpenRouterMessage = {
+    role: "user",
+    content: userMessage,
+  };
+
+  // Build context with conversation history
+  const messages = conversationHistory.buildContext(
+    chatId,
+    userMessageObj,
+    systemPrompt,
+    MAX_CONTEXT_TOKENS,
+    countTokens
+  );
+
+  console.log(`Built context with ${messages.length} messages for chat ${chatId}`);
+  console.log(`Calling OpenRouter with model: ${MODEL}`);
+  
+  const response = await callOpenRouter(messages, MODEL);
+  
+  // Store user message and AI response in conversation history
+  conversationHistory.addMessage(chatId, userMessageObj);
+  conversationHistory.addMessage(chatId, {
+    role: "assistant",
+    content: response,
+  });
+  
+  return response;
 }
