@@ -3,6 +3,7 @@ name: Unified Bot Deployment
 on:
   push:
     branches: ['**']  # Trigger on all branches
+  workflow_dispatch:  # Allow manual triggering
 
 permissions:
   id-token: write  # Required for OIDC token authentication
