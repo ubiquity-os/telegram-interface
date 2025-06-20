@@ -1,7 +1,8 @@
 import { webhookCallback } from "grammy";
-import { createBot, getBotTokenForDeployment } from "./bot-factory.ts";
+import { createBot } from "./bot-factory.ts";
 import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
+import { detectBotFromUpdate, type TelegramUpdate } from "./services/bot-detection.ts";
 
 const config = getConfig();
 
@@ -9,10 +10,9 @@ Deno.serve({
   port: 8000,
   onListen: ({ hostname, port }) => {
     console.log(`Webhook server running at http://${hostname}:${port}`);
-    console.log(`Production webhook: /webhook/${config.webhookSecret}`);
-    if (config.previewBotToken) {
-      console.log(`Preview webhook: /webhook-preview/${config.webhookSecret}`);
-    }
+    console.log(`Universal webhook: /webhook/${config.webhookSecret}`);
+    console.log(`Production Bot ID: ${config.botId}`);
+    console.log(`Preview Bot ID: ${config.previewBotId || "not configured"}`);
   },
 }, async (req) => {
   const url = new URL(req.url);
@@ -22,7 +22,12 @@ Deno.serve({
     return new Response(JSON.stringify({
       status: "ok",
       timestamp: new Date().toISOString(),
-      deduplicationCacheSize: deduplicationService.getSize()
+      deduplicationCacheSize: deduplicationService.getSize(),
+      botConfiguration: {
+        productionBotId: config.botId,
+        previewBotId: config.previewBotId || "not configured",
+        hasPreviewBot: !!config.previewBotToken
+      }
     }), {
       headers: { "Content-Type": "application/json" },
     });
@@ -145,15 +150,12 @@ Deno.serve({
     }
   }
 
-  // Webhook endpoints - different paths for each bot
-  const isProductionWebhook = url.pathname === `/webhook/${config.webhookSecret}`;
-  const isPreviewWebhook = url.pathname === `/webhook-preview/${config.webhookSecret}`;
-  
-  if ((isProductionWebhook || isPreviewWebhook) && req.method === "POST") {
+  // Universal webhook endpoint - handles both production and preview bots
+  if (url.pathname === `/webhook/${config.webhookSecret}` && req.method === "POST") {
     try {
-      // Parse the update to check for duplicates
+      // Parse the update to check for duplicates and detect bot
       const bodyText = await req.text();
-      const update = JSON.parse(bodyText);
+      const update: TelegramUpdate = JSON.parse(bodyText);
       
       // Check if we've already processed this update
       if (update.update_id && deduplicationService.hasProcessed(update.update_id)) {
@@ -167,14 +169,22 @@ Deno.serve({
         console.log(`Processing new update: ${update.update_id}`);
       }
       
-      // Determine which bot to use based on the webhook path
-      const botToken = isProductionWebhook ? config.botToken : config.previewBotToken!;
-      const botType = isProductionWebhook ? "PRODUCTION" : "PREVIEW";
-      console.log(`📍 Webhook received on ${botType} endpoint`);
+      // Detect which bot should handle this update
+      console.log("🎯 Detecting bot from update metadata...");
+      const detection = detectBotFromUpdate(
+        update,
+        config.botId,
+        config.previewBotId,
+        config.botToken,
+        config.previewBotToken
+      );
+      
+      console.log(`📍 Update detected for ${detection.botType.toUpperCase()} bot (ID: ${detection.detectedBotId})`);
+      console.log(`📡 Detection method: ${detection.detectionMethod}`);
       
       // Process the update asynchronously (don't await)
       // This allows us to return 200 OK immediately
-      processUpdateAsync(bodyText, botToken, botType);
+      processUpdateAsync(bodyText, detection.botToken, detection.botType);
       
       // Return 200 OK immediately to acknowledge webhook
       return new Response("OK", { status: 200 });
@@ -192,7 +202,7 @@ Deno.serve({
 // Async function to process updates in the background
 async function processUpdateAsync(bodyText: string, botToken: string, botType: string) {
   try {
-    console.log(`🤖 Processing update with ${botType} bot`);
+    console.log(`🤖 Processing update with ${botType.toUpperCase()} bot`);
     
     // Create the appropriate bot instance
     const bot = createBot(botToken);

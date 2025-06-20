@@ -53,14 +53,20 @@ export function getConfig(): Config {
     throw new Error("BOT_TOKEN is required");
   }
 
-  // Parse bot ID from token
-  const botId = botToken.split(":")[0];
+  // Get bot ID from environment variable or parse from token
+  let botId = getEnvVar("BOT_ID");
   if (!botId) {
-    throw new Error("Invalid BOT_TOKEN format");
+    botId = botToken.split(":")[0];
+    if (!botId) {
+      throw new Error("Invalid BOT_TOKEN format and BOT_ID not provided");
+    }
   }
 
   const previewBotToken = getEnvVar("PREVIEW_BOT_TOKEN");
-  const previewBotId = previewBotToken ? previewBotToken.split(":")[0] : undefined;
+  let previewBotId = getEnvVar("PREVIEW_BOT_ID");
+  if (previewBotToken && !previewBotId) {
+    previewBotId = previewBotToken.split(":")[0];
+  }
 
   const openRouterApiKey = getEnvVar("OPENROUTER_API_KEY");
   console.log("OPENROUTER_API_KEY exists:", !!openRouterApiKey);

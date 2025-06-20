@@ -1,5 +1,7 @@
 // Manage webhooks for both production and preview bots
 
+export {}; // Make this file a module
+
 const productionToken = Deno.env.get("BOT_TOKEN") || "";
 const previewToken = Deno.env.get("PREVIEW_BOT_TOKEN") || "";
 const webhookSecret = Deno.env.get("WEBHOOK_SECRET") || "";
@@ -95,12 +97,12 @@ switch (command) {
       "Production Bot"
     );
     
-    // Set preview webhook if token exists
+    // Set preview webhook if token exists (now uses universal endpoint)
     if (previewToken) {
       await manageWebhook(
         previewToken,
         "set",
-        `${deploymentUrl}/webhook-preview/${webhookSecret}`,
+        `${deploymentUrl}/webhook/${webhookSecret}`,
         "Preview Bot"
       );
     } else {

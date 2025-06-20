@@ -1,40 +1,56 @@
 # Telegram Bot for Deno Deploy
 
-A minimal Telegram bot built with Grammy and designed to run on Deno Deploy. The bot responds "ok" to all messages.
+A sophisticated Telegram bot interface built with Grammy, designed for seamless deployment on Deno Deploy with AI-powered responses and multi-environment support.
 
 ## Features
 
-- Webhook-based architecture for serverless deployment
-- Built with [Grammy](https://grammy.dev/) framework
-- TypeScript with Deno runtime
-- Automatic deployment via GitHub Actions
-- Health check endpoint
-- Request logging middleware
-- AI-powered responses via OpenRouter
-- MCP (Model Context Protocol) tool integration
-- Automatic preview bot webhook updates for testing
+- **Universal Webhook Architecture** - Single endpoint handles both production and preview bots
+- **Intelligent Bot Detection** - Automatic routing based on Telegram update metadata
+- **AI-Powered Responses** - Integration with OpenRouter for intelligent conversations
+- **MCP Tool Integration** - Model Context Protocol for extended capabilities
+- **Multi-Environment Support** - Production and preview environments with automatic management
+- **Conversation History** - Persistent context using Deno KV storage
+- **Deduplication System** - Prevents duplicate message processing
+- **Comprehensive Monitoring** - Health checks, logging, and debugging endpoints
+- **Built with [Grammy](https://grammy.dev/)** - Modern TypeScript framework
+- **Serverless-Optimized** - Designed for edge deployment and auto-scaling
+
+## Architecture Overview
+
+The bot uses a **Universal Webhook Architecture** that intelligently routes updates to the correct bot instance based on Telegram update metadata. This eliminates the need for separate webhook endpoints and simplifies deployment management.
+
+### Key Components
+
+- **Universal Webhook Handler** (`src/main.ts`) - Single endpoint that handles all bot updates
+- **Bot Detection System** (`src/services/bot-detection.ts`) - Analyzes updates to determine target bot
+- **Bot Factory** (`src/bot-factory.ts`) - Creates and caches bot instances
+- **Conversation History** (`src/services/conversation-history.ts`) - Persistent context with Deno KV
+- **AI Integration** (`src/services/get-ai-response.ts`) - OpenRouter integration with MCP tools
 
 ## Project Structure
 
 ```
 telegram-interface/
 ├── src/
-│   ├── main.ts           # Entry point for Deno Deploy
-│   ├── bot.ts            # Bot initialization
-│   ├── handlers/         # Message handlers
-│   │   └── message.ts    # Basic message handler
-│   ├── middleware/       # Bot middleware
-│   │   └── logger.ts     # Request logging
-│   └── utils/            # Utility functions
-│       └── config.ts     # Configuration management
-├── tests/
-│   └── bot.test.ts       # Basic test suite
-├── .github/
-│   └── workflows/
-│       └── deploy.yml    # GitHub Actions deployment
-├── deno.json             # Deno configuration
-├── .env.example          # Example environment variables
-└── .gitignore           # Git ignore rules
+│   ├── main.ts                 # Universal webhook handler
+│   ├── bot-factory.ts          # Bot instance management
+│   ├── handlers/               # Message and callback handlers
+│   ├── middleware/             # Bot middleware
+│   ├── services/               # Core services
+│   │   ├── bot-detection.ts    # Bot identification logic
+│   │   ├── conversation-history.ts # Persistent context
+│   │   ├── deduplication.ts    # Duplicate prevention
+│   │   ├── get-ai-response.ts  # AI response generation
+│   │   └── mcp-hub.ts         # MCP tool integration
+│   └── utils/                  # Utility functions
+├── scripts/                    # Management and testing scripts
+│   ├── deployment-fix-summary.ts # Comprehensive documentation
+│   ├── manage-webhooks.ts      # Webhook management
+│   ├── test-bot-detection.ts   # Bot detection testing
+│   └── check-both-webhooks.ts  # Status monitoring
+├── tests/                      # Test suites
+├── docs/                       # Comprehensive documentation
+└── deno.json                   # Deno configuration
 ```
 
 ## Setup
@@ -44,10 +60,19 @@ telegram-interface/
    ```bash
    cp .env.example .env
    ```
-3. Add your bot token to `.env`:
+3. Configure your environment variables:
    ```
-   BOT_TOKEN=<your-bot-token-from-botfather>
+   # Required for production
+   BOT_TOKEN=<your-production-bot-token>
    WEBHOOK_SECRET=<generate-random-string>
+   
+   # Optional for preview testing
+   PREVIEW_BOT_TOKEN=<your-preview-bot-token>
+   
+   # AI Integration (optional)
+   OPENROUTER_API_KEY=<your-openrouter-key>
+   
+   # Logging
    LOG_LEVEL=info
    ENVIRONMENT=development
    ```
@@ -99,32 +124,45 @@ Set these in your Deno Deploy project dashboard:
 
 The project is configured for automatic deployment via GitHub Actions. Simply push to the `main` branch and the bot will be deployed automatically.
 
-### Webhook Setup
+### Universal Webhook Setup
 
-Use the provided webhook management scripts:
+The new architecture uses a single webhook endpoint for both bots:
 
 ```bash
-# Set webhook for production bot
-deno run --allow-net --allow-env scripts/set-webhook.ts https://your-project.deno.dev
+# Set both bots to use the universal endpoint
+bun scripts/manage-webhooks.ts set production https://your-project.deno.dev
+bun scripts/manage-webhooks.ts set preview https://your-preview-project.deno.dev
 
-# Check webhook status
-deno run --allow-net --allow-env --allow-read scripts/manage-webhooks.ts check production
+# Check webhook status for both bots
+bun scripts/check-both-webhooks.ts
+
+# Test bot detection system
+bun scripts/test-bot-detection.ts
 ```
 
 ### Preview Testing
 
-The project supports automatic preview deployments with a dedicated test bot:
+Simplified preview testing workflow:
 
-1. Add `PREVIEW_BOT_TOKEN` to your `.env` file
-2. Push to a non-main branch
-3. Use GitHub Actions or manual scripts to update the preview bot webhook
+1. Deploy to preview environment
+2. Set preview bot webhook: `bun scripts/switch-to-preview.ts https://your-preview.deno.dev`
+3. Test with preview bot - both bots now use the same universal endpoint
+4. No manual webhook switching needed between environments
 
-See [Preview Testing Guide](docs/preview-testing-guide.md) and [GitHub Actions Setup](docs/github-actions-setup.md) for details.
+### Deployment Summary
+
+Get a comprehensive overview of the deployment fix:
+
+```bash
+bun scripts/deployment-fix-summary.ts
+```
 
 ## API Endpoints
 
-- `GET /health` - Health check endpoint
-- `POST /webhook/{secret}` - Telegram webhook endpoint
+- `GET /health` - Health check with bot configuration status
+- `POST /webhook/{secret}` - Universal webhook endpoint (handles both bots)
+- `GET /conversations` - Debug endpoint for conversation history
+- `GET /conversations?chatId={id}` - View specific conversation history
 
 ## Security
 

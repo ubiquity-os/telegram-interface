@@ -1,5 +1,7 @@
 // Set webhook for Telegram bot
 
+export {}; // Make this file a module
+
 const botToken = Deno.env.get("BOT_TOKEN");
 const previewBotToken = Deno.env.get("PREVIEW_BOT_TOKEN");
 const webhookSecret = Deno.env.get("WEBHOOK_SECRET");
@@ -50,7 +52,7 @@ await setWebhook(botToken, `/webhook/${webhookSecret}`, "Production Bot");
 
 // Set webhook for preview bot if configured
 if (previewBotToken) {
-  await setWebhook(previewBotToken, `/webhook-preview/${webhookSecret}`, "Preview Bot");
+  await setWebhook(previewBotToken, `/webhook/${webhookSecret}`, "Preview Bot");
 } else {
   console.log("\n⚠️  Preview bot token not configured, skipping preview webhook setup");
 }
