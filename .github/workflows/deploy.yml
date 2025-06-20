@@ -27,8 +27,15 @@ jobs:
       - name: Verify Token Access
         run: |
           echo "Verifying token access to project..."
-          curl -s -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
-          https://api.deno.com/v1/projects/UbiquityOS/telegram-interface | jq .
+          response=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
+          https://api.deno.com/v1/projects/UbiquityOS/telegram-interface)
+          
+          if [ "$response" -eq 200 ]; then
+            echo "Token verification successful"
+          else
+            echo "ERROR: Token verification failed with status $response"
+            exit 1
+          fi
 
       - name: Deploy
         uses: denoland/deployctl@1.13.1
