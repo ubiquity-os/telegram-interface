@@ -55,7 +55,12 @@ export class McpHub {
         });
       }
     } catch (error) {
-      console.error("Failed to load MCP settings:", error);
+      if (error.name === "NotFound") {
+        console.log("MCP settings file not found, continuing without MCP servers");
+        // Continue without MCP servers - bot will work with core tools only
+      } else {
+        console.error("Failed to load MCP settings:", error);
+      }
     }
   }
 

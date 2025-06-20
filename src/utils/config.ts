@@ -2,6 +2,7 @@ import { load } from "std/dotenv/mod.ts";
 
 export interface Config {
   botToken: string;
+  previewBotToken?: string;
   webhookSecret: string;
   logLevel: "debug" | "info" | "error";
   environment: "development" | "production";
@@ -32,6 +33,7 @@ export function getConfig(): Config {
 
   return {
     botToken,
+    previewBotToken: Deno.env.get("PREVIEW_BOT_TOKEN"),
     webhookSecret: Deno.env.get("WEBHOOK_SECRET") || crypto.randomUUID(),
     logLevel: (Deno.env.get("LOG_LEVEL") || "info") as Config["logLevel"],
     environment: (Deno.env.get("ENVIRONMENT") || "development") as Config["environment"],

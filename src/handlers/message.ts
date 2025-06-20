@@ -1,5 +1,6 @@
 import { Context, InlineKeyboard } from "grammy";
 import { getAIResponse, getLastToolResult } from "../services/get-ai-response.ts";
+import { getRandomProcessingMessage, getLongProcessingMessage } from "../services/processing-messages.ts";
 
 export async function messageHandler(ctx: Context) {
   console.log("=== MESSAGE HANDLER CALLED ===");
@@ -24,12 +25,38 @@ export async function messageHandler(ctx: Context) {
 
     // Send typing indicator
     await ctx.replyWithChatAction("typing");
+    
+    // Send a processing message immediately for better UX
+    const processingMessage = await ctx.reply(getRandomProcessingMessage());
+    
+    // Set up a timer to send a "taking longer" message if needed
+    const longProcessingTimer = setTimeout(async () => {
+      try {
+        await ctx.api.editMessageText(
+          chatId,
+          processingMessage.message_id,
+          getLongProcessingMessage()
+        );
+      } catch (error) {
+        console.log("Could not update processing message:", error);
+      }
+    }, 5000); // Update after 5 seconds
 
     try {
       console.log("Attempting to get AI response with conversation context...");
       // Get AI response with conversation context
       const aiResponse = await getAIResponse(userMessage, chatId);
       console.log("AI response received:", aiResponse?.substring(0, 100) + "...");
+      
+      // Clear the long processing timer
+      clearTimeout(longProcessingTimer);
+      
+      // Delete the processing message
+      try {
+        await ctx.api.deleteMessage(chatId, processingMessage.message_id);
+      } catch (error) {
+        console.log("Could not delete processing message:", error);
+      }
       
       // Check if this is a followup question with options
       const lastToolResult = getLastToolResult();

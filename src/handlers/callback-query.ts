@@ -1,5 +1,6 @@
 import { Context } from "grammy";
 import { getAIResponse, getLastToolResult } from "../services/get-ai-response.ts";
+import { getRandomProcessingMessage } from "../services/processing-messages.ts";
 
 export async function callbackQueryHandler(ctx: Context) {
   console.log("=== CALLBACK QUERY HANDLER CALLED ===");
@@ -44,9 +45,19 @@ export async function callbackQueryHandler(ctx: Context) {
           // Send typing indicator
           await ctx.replyWithChatAction("typing");
           
+          // Send a processing message
+          const processingMessage = await ctx.reply(getRandomProcessingMessage());
+          
           // Process the selected option as the user's response
           console.log(`User selected option: ${selectedOption}`);
           const aiResponse = await getAIResponse(selectedOption, chatId);
+          
+          // Delete the processing message
+          try {
+            await ctx.api.deleteMessage(chatId, processingMessage.message_id);
+          } catch (error) {
+            console.log("Could not delete processing message:", error);
+          }
           
           // Send the AI's response
           await ctx.reply(aiResponse);
