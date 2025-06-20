@@ -15,8 +15,8 @@ await load({ export: true }).catch(() => {
 });
 
 export function getConfig(): Config {
-  console.log("=== CONFIG LOADING ===");
-  console.log("Environment variables present:", Object.keys(Deno.env.toObject()));
+  // console.log("=== CONFIG LOADING ===");
+  // console.log("Environment variables present:", Object.keys(Deno.env.toObject()));
   
   const botToken = Deno.env.get("BOT_TOKEN");
   if (!botToken) {
