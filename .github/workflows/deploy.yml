@@ -1,28 +1,19 @@
-name: Dual Bot Deployment
+name: Unified Bot Deployment
 
 on:
   push:
     branches: ['**']  # Trigger on all branches
 
-# Add permissions at the workflow level
 permissions:
   id-token: write  # Required for OIDC token authentication
   contents: read   # Required for actions/checkout
 
 jobs:
-  production:
-    if: github.ref == 'refs/heads/main'
+  deploy:
     runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to production
-        uses: denoland/deployctl@v1
-        with:
-          project: telegram-interface
-          entrypoint: src/main.ts
-
-  preview:
-    if: github.ref != 'refs/heads/main'
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [production, preview]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -32,15 +23,17 @@ jobs:
         with:
           deno-version: v1.43.0
 
-      - name: Deploy preview
+      - name: Deploy
         uses: denoland/deployctl@v1
         with:
-          project: telegram-interface-preview
+          project: telegram-interface
           entrypoint: src/main.ts
+          production: ${{ matrix.environment == 'production' }}
 
-      - name: Update preview webhook
-        run: deno run --allow-net --allow-env scripts/update-preview-webhook.ts
+      - name: Update webhook
+        run: deno run --allow-net --allow-env scripts/update-webhook.ts
         env:
           DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
-          PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
-          WEBHOOK_SECRET_PREVIEW: ${{ secrets.WEBHOOK_SECRET_PREVIEW }}
+          BOT_TOKEN: ${{ matrix.environment == 'production' && secrets.PRODUCTION_BOT_TOKEN || secrets.PREVIEW_BOT_TOKEN }}
+          WEBHOOK_SECRET: ${{ matrix.environment == 'production' && secrets.WEBHOOK_SECRET_PRODUCTION || secrets.WEBHOOK_SECRET_PREVIEW }}
+          IS_PRODUCTION: ${{ matrix.environment == 'production' }}

@@ -98,20 +98,39 @@ export class DenoDeployApi {
     }
   }
 
-  async getLatestNonMainDeploymentUrl(): Promise<string | null> {
+  async getLatestDeploymentUrl(isProduction: boolean): Promise<string> {
     try {
       const deploymentsResponse = await this.getDeployments(1, 50);
       
-      // Filter for successful, non-production deployments
-      const previewDeployments = deploymentsResponse.deployments.filter(
+      // Filter for successful deployments
+      const validDeployments = deploymentsResponse.deployments.filter(
         deployment => 
           deployment.status === "success" && 
-          !deployment.isProductionDeployment &&
           deployment.url
       );
 
+      if (validDeployments.length === 0) {
+        throw new Error("No successful deployments found");
+      }
+
+      // Find production deployment if requested
+      if (isProduction) {
+        const productionDeployment = validDeployments.find(
+          d => d.isProductionDeployment
+        );
+        if (productionDeployment) {
+          return productionDeployment.url;
+        }
+        return `https://${this.projectName}.deno.dev`;
+      }
+
+      // For preview, find the latest non-production deployment
+      const previewDeployments = validDeployments.filter(
+        d => !d.isProductionDeployment
+      );
+
       if (previewDeployments.length === 0) {
-        return null;
+        throw new Error("No preview deployments found");
       }
 
       // Sort deployments by createdAt date (newest first)
@@ -122,35 +141,13 @@ export class DenoDeployApi {
       // Return the most recent preview deployment URL
       return previewDeployments[0].url;
     } catch (error) {
-      console.error("Error fetching latest non-main deployment:", error);
-      return null;
+      console.error("Error fetching deployment URL:", error);
+      throw error;
     }
-  }
-
-  async getProductionDeploymentUrl(): Promise<string> {
-    return `https://${this.projectName}.deno.dev`;
-  }
-
-  async getAllDeploymentUrls(): Promise<{ production: string; preview: string | null }> {
-    const [production, preview] = await Promise.all([
-      this.getProductionDeploymentUrl(),
-      this.getLatestNonMainDeploymentUrl(),
-    ]);
-
-    return { production, preview };
   }
 }
 
-export async function getDeploymentUrl(botType: "production" | "preview"): Promise<string> {
+export async function getDeploymentUrl(isProduction: boolean): Promise<string> {
   const api = new DenoDeployApi();
-  
-  if (botType === "production") {
-    return await api.getProductionDeploymentUrl();
-  } else {
-    const previewUrl = await api.getLatestNonMainDeploymentUrl();
-    if (!previewUrl) {
-      throw new Error("No preview deployment found. Deploy a branch to get a preview URL.");
-    }
-    return previewUrl;
-  }
+  return await api.getLatestDeploymentUrl(isProduction);
 }
