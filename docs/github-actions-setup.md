@@ -89,11 +89,42 @@ Add your Deno Deploy API token to GitHub secrets (see "Getting a Deno Deploy Tok
 2. Try the manual workflow instead
 3. Check if your project name in Deno Deploy matches the workflow
 
+### JQ Parse Error
+
+If you see `jq: error (at <stdin>:18): Cannot index array with string "items"`, this means the Deno Deploy API response format is different than expected. The updated workflow now handles both array and object responses.
+
 ### Webhook Update Fails
 
 1. Verify all required secrets are set in GitHub
 2. Check that your preview deployment is actually running
 3. Look at the workflow logs for specific error messages
+
+## Alternative: Deno Deploy Webhook Integration
+
+You can also set up Deno Deploy to notify GitHub when deployments complete:
+
+1. In Deno Deploy project settings, add a webhook:
+   - URL: `https://api.github.com/repos/YOUR_ORG/YOUR_REPO/dispatches`
+   - Headers:
+     ```
+     Authorization: token YOUR_GITHUB_PAT
+     Accept: application/vnd.github.v3+json
+     ```
+   - Payload:
+     ```json
+     {
+       "event_type": "deno-deploy-preview",
+       "client_payload": {
+         "url": "{{url}}",
+         "deploymentId": "{{deploymentId}}",
+         "branch": "{{branch}}"
+       }
+     }
+     ```
+
+2. The `deno-deploy-webhook.yml` workflow will handle these webhooks automatically
+
+This approach is more reliable as it triggers after the deployment is complete.
 
 ## Alternative: Local Script
 

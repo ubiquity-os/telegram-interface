@@ -33,39 +33,70 @@ jobs:
           BRANCH_NAME=${GITHUB_REF#refs/heads/}
           echo "Branch: $BRANCH_NAME"
           
-          # Deno Deploy preview URLs follow a pattern, but we need to fetch the exact URL
-          # For now, we'll construct it based on common patterns
-          # You may need to adjust this based on your Deno Deploy project settings
-          
           # Try to get the deployment URL from Deno Deploy API
           # Note: This requires DENO_DEPLOY_TOKEN to be set in GitHub secrets
           if [ -n "${{ secrets.DENO_DEPLOY_TOKEN }}" ]; then
             echo "Fetching deployment info from Deno Deploy API..."
             
-            # Get latest deployment for the branch
+            # Get latest deployment for the project
             DEPLOYMENT_INFO=$(curl -s -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
-              "https://api.deno.com/v1/projects/${PROJECT_NAME}/deployments?limit=1&branch=${BRANCH_NAME}")
+              "https://api.deno.com/v1/projects/${PROJECT_NAME}/deployments?limit=20")
             
-            PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r '.items[0].url // empty')
+            # Debug: Show the API response structure
+            echo "API Response (first 500 chars):"
+            echo "$DEPLOYMENT_INFO" | head -c 500
+            echo ""
             
-            if [ -n "$PREVIEW_URL" ]; then
+            # Check if response is an array or object with items
+            if echo "$DEPLOYMENT_INFO" | jq -e 'type == "array"' > /dev/null 2>&1; then
+              # Response is an array
+              echo "Response is an array"
+              # Find deployment for our branch
+              PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r --arg branch "$BRANCH_NAME" '.[] | select(.branch == $branch) | .url // empty' | head -1)
+              
+              # If not found, try to get the latest deployment URL
+              if [ -z "$PREVIEW_URL" ]; then
+                PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r '.[0].url // empty')
+              fi
+            else
+              # Response might be an object with items array
+              echo "Checking for object with items array"
+              PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r --arg branch "$BRANCH_NAME" '.items[] | select(.branch == $branch) | .url // empty' | head -1)
+              
+              # If not found, try to get the latest deployment URL
+              if [ -z "$PREVIEW_URL" ]; then
+                PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r '.items[0].url // empty')
+              fi
+            fi
+            
+            if [ -n "$PREVIEW_URL" ] && [ "$PREVIEW_URL" != "null" ]; then
               echo "Found preview URL from API: $PREVIEW_URL"
               echo "preview_url=$PREVIEW_URL" >> $GITHUB_OUTPUT
             else
-              echo "Could not fetch preview URL from API, will wait and retry..."
+              echo "Could not parse preview URL from API response"
+              echo "Waiting 30 seconds and retrying..."
               sleep 30
               
-              # Retry once more
+              # Retry with a different approach - look for deployment by commit
+              COMMIT_SHA=$(git rev-parse HEAD)
+              echo "Looking for deployment with commit: $COMMIT_SHA"
+              
               DEPLOYMENT_INFO=$(curl -s -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
-                "https://api.deno.com/v1/projects/${PROJECT_NAME}/deployments?limit=1&branch=${BRANCH_NAME}")
+                "https://api.deno.com/v1/projects/${PROJECT_NAME}/deployments?limit=10")
               
-              PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r '.items[0].url // empty')
+              # Try to find by commit SHA
+              if echo "$DEPLOYMENT_INFO" | jq -e 'type == "array"' > /dev/null 2>&1; then
+                PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r --arg sha "$COMMIT_SHA" '.[] | select(.commitSha == $sha or .commit == $sha) | .url // empty' | head -1)
+              else
+                PREVIEW_URL=$(echo "$DEPLOYMENT_INFO" | jq -r --arg sha "$COMMIT_SHA" '.items[] | select(.commitSha == $sha or .commit == $sha) | .url // empty' | head -1)
+              fi
               
-              if [ -n "$PREVIEW_URL" ]; then
-                echo "Found preview URL from API: $PREVIEW_URL"
+              if [ -n "$PREVIEW_URL" ] && [ "$PREVIEW_URL" != "null" ]; then
+                echo "Found preview URL by commit SHA: $PREVIEW_URL"
                 echo "preview_url=$PREVIEW_URL" >> $GITHUB_OUTPUT
               else
                 echo "Failed to get preview URL from API"
+                echo "Please check your DENO_DEPLOY_TOKEN and project name"
                 exit 1
               fi
             fi

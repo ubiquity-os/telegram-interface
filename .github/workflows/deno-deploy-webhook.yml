@@ -1,15 +1,11 @@
-name: Update Preview Bot Webhook (Simple)
+name: Handle Deno Deploy Webhook
 
 on:
-  workflow_dispatch:
-    inputs:
-      preview_url:
-        description: 'Deno Deploy Preview URL'
-        required: true
-        type: string
+  repository_dispatch:
+    types: [deno-deploy-preview]
 
 jobs:
-  update-webhook:
+  update-preview-webhook:
     runs-on: ubuntu-latest
     
     steps:
@@ -21,7 +17,33 @@ jobs:
         with:
           deno-version: v1.x
       
+      - name: Extract Preview URL
+        id: extract-url
+        run: |
+          # The preview URL should be in the event payload
+          PREVIEW_URL="${{ github.event.client_payload.url }}"
+          DEPLOYMENT_ID="${{ github.event.client_payload.deploymentId }}"
+          BRANCH="${{ github.event.client_payload.branch }}"
+          
+          echo "Deployment ID: $DEPLOYMENT_ID"
+          echo "Branch: $BRANCH"
+          echo "Preview URL: $PREVIEW_URL"
+          
+          if [ -z "$PREVIEW_URL" ]; then
+            echo "Error: No preview URL provided in webhook payload"
+            exit 1
+          fi
+          
+          # Only process non-main branches
+          if [ "$BRANCH" = "main" ]; then
+            echo "Skipping main branch deployment"
+            exit 0
+          fi
+          
+          echo "preview_url=$PREVIEW_URL" >> $GITHUB_OUTPUT
+      
       - name: Update Preview Bot Webhook
+        if: steps.extract-url.outputs.preview_url != ''
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
@@ -37,7 +59,7 @@ jobs:
             exit 1
           fi
           
-          PREVIEW_URL="${{ inputs.preview_url }}"
+          PREVIEW_URL="${{ steps.extract-url.outputs.preview_url }}"
           
           echo "Setting webhook for preview bot to: $PREVIEW_URL"
           
@@ -46,6 +68,7 @@ jobs:
             scripts/manage-webhooks.ts set preview "$PREVIEW_URL"
       
       - name: Verify Webhook
+        if: steps.extract-url.outputs.preview_url != ''
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
