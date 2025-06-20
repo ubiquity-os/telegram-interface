@@ -65,7 +65,7 @@ jobs:
           
           # Run the webhook update script
           deno run --allow-net --allow-env --allow-read \
-            scripts/manage-webhooks.ts set preview "$PREVIEW_URL"
+            scripts/update-preview-webhook.ts "$PREVIEW_URL"
       
       - name: Verify Webhook
         if: steps.extract-url.outputs.preview_url != ''
@@ -76,4 +76,4 @@ jobs:
         run: |
           echo "Verifying webhook was set correctly..."
           deno run --allow-net --allow-env --allow-read \
-            scripts/manage-webhooks.ts check preview
+            scripts/check-both-webhooks.ts

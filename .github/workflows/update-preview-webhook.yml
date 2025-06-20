@@ -120,7 +120,7 @@ jobs:
           
           # Run the webhook update script
           deno run --allow-net --allow-env --allow-read \
-            scripts/manage-webhooks.ts set preview "$PREVIEW_URL"
+            scripts/update-preview-webhook.ts "$PREVIEW_URL"
       
       - name: Verify Webhook
         env:
@@ -130,7 +130,7 @@ jobs:
         run: |
           echo "Verifying webhook was set correctly..."
           deno run --allow-net --allow-env --allow-read \
-            scripts/manage-webhooks.ts check preview
+            scripts/check-both-webhooks.ts
       
       - name: Comment on PR (if exists)
         if: github.event_name == 'pull_request' || github.event.pull_request
