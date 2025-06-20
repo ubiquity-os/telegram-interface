@@ -15,12 +15,17 @@ await load({ export: true }).catch(() => {
 });
 
 export function getConfig(): Config {
+  console.log("=== CONFIG LOADING ===");
+  console.log("Environment variables present:", Object.keys(Deno.env.toObject()));
+  
   const botToken = Deno.env.get("BOT_TOKEN");
   if (!botToken) {
     throw new Error("BOT_TOKEN is required");
   }
 
   const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY");
+  console.log("OPENROUTER_API_KEY exists:", !!openRouterApiKey);
+  
   if (!openRouterApiKey) {
     throw new Error("OPENROUTER_API_KEY is required");
   }
