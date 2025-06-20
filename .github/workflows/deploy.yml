@@ -28,7 +28,7 @@ jobs:
         run: |
           echo "Verifying token access to project..."
           response=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
-          https://api.deno.com/v1/projects/UbiquityOS/telegram-interface)
+          https://dash.deno.com/api/projects/telegram-interface)
           
           if [ "$response" -eq 200 ]; then
             echo "Token verification successful"
