@@ -13,6 +13,13 @@ const MAX_CONTEXT_TOKENS = 64000; // 64k tokens for context, leaving plenty for 
 const MAX_TOOL_ITERATIONS = 5; // Prevent infinite tool loops
 const MAX_RETRY_ATTEMPTS = 3; // Max retries for forcing proper response format
 
+// Store the last tool result for inline keyboard support
+let lastToolResult: any = null;
+
+export function getLastToolResult() {
+  return lastToolResult;
+}
+
 export async function getAIResponse(userMessage: string, chatId: number): Promise<string> {
   // Initialize MCP hub if not already done
   await mcpHub.loadSettings();
@@ -51,6 +58,7 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
     let toolIterations = 0;
     let lastAssistantMessage = "";
     let hasValidResponse = false;
+    let pendingUserResponse = false;
 
     // Tool calling loop
     while (toolIterations < MAX_TOOL_ITERATIONS) {
@@ -72,7 +80,6 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
       }
       
       let hasToolCall = false;
-      let pendingUserResponse = false;
       
       for (const block of contentBlocks) {
         if (block.type === "text" && block.content) {
@@ -88,14 +95,12 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
             pendingUserResponse = true;
             
             if (result.result?.type === "followup_question") {
+              // Store the tool result for inline keyboard
+              lastToolResult = result.result;
+              
               // Format the question for the user
               let questionText = result.result.question;
-              if (result.result.options && result.result.options.length > 0) {
-                questionText += "\n\nOptions:\n";
-                result.result.options.forEach((option: string, index: number) => {
-                  questionText += `${index + 1}. ${option}\n`;
-                });
-              }
+              // Don't add options as text if we have them - they'll be shown as buttons
               finalResponse = questionText;
             }
             break;
@@ -180,6 +185,11 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
       
       // Clean up any remaining XML tags from the response
       finalResponse = finalResponse.replace(/<\/?[^>]+(>|$)/g, "").trim();
+      
+      // Clear lastToolResult if this wasn't a followup question
+      if (!pendingUserResponse) {
+        lastToolResult = null;
+      }
       
       return finalResponse || "I apologize, but I couldn't generate a proper response. Please try again.";
     }

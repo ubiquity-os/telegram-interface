@@ -1,5 +1,5 @@
-import { Context } from "grammy";
-import { getAIResponse } from "../services/get-ai-response.ts";
+import { Context, InlineKeyboard } from "grammy";
+import { getAIResponse, getLastToolResult } from "../services/get-ai-response.ts";
 
 export async function messageHandler(ctx: Context) {
   console.log("=== MESSAGE HANDLER CALLED ===");
@@ -31,8 +31,23 @@ export async function messageHandler(ctx: Context) {
       const aiResponse = await getAIResponse(userMessage, chatId);
       console.log("AI response received:", aiResponse?.substring(0, 100) + "...");
       
-      // Send AI response
-      await ctx.reply(aiResponse);
+      // Check if this is a followup question with options
+      const lastToolResult = getLastToolResult();
+      if (lastToolResult?.type === "followup_question" && lastToolResult.options) {
+        // Create inline keyboard with options
+        const keyboard = new InlineKeyboard();
+        lastToolResult.options.forEach((option: string, index: number) => {
+          keyboard.text(option, `option_${chatId}_${index}`).row();
+        });
+        
+        // Send message with inline keyboard
+        await ctx.reply(aiResponse, {
+          reply_markup: keyboard,
+        });
+      } else {
+        // Send regular text response
+        await ctx.reply(aiResponse);
+      }
       
       console.log(`Successfully sent AI response to user ${ctx.from?.id} in chat ${chatId}`);
     } catch (aiError) {
