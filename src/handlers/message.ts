@@ -3,7 +3,8 @@ import { getAIResponse } from "../services/get-ai-response.ts";
 
 export async function messageHandler(ctx: Context) {
   console.log("=== MESSAGE HANDLER CALLED ===");
-  console.log("Handler version: AI-integrated");
+  console.log("Handler version: AI-integrated with deduplication");
+  console.log(`Update ID: ${ctx.update.update_id}`);
   
   try {
     const userMessage = ctx.message?.text;
