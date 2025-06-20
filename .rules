@@ -1,0 +1,8 @@
+# Project Execution Rules
+- ALWAYS use Deno for running TypeScript files in this project
+- NEVER use Bun for execution or package management
+- Use `deno run` instead of `bun run` for all scripts
+- Use `deno install` instead of `bun install` for dependencies
+- Use `Deno.env.get()` instead of `process.env` for environment variables
+- Use `--allow-env` flag when environment access is needed
+- Use `--allow-net` flag when network access is needed

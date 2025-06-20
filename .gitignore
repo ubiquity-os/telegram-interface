@@ -3,3 +3,4 @@
 *.log
 .DS_Store
 mcp-settings.json
+node_modules

@@ -4,7 +4,7 @@ import { getDeploymentUrl } from "./deno-deploy-api.ts";
 type BotType = "production" | "preview";
 
 function parseArgs(): { botType: BotType; deploymentUrl?: string } {
-  const args = Deno.args;
+  const args = process.argv.slice(2);
   let botType: BotType = "production"; // Default to production for backward compatibility
   let deploymentUrl: string | undefined;
 
@@ -18,7 +18,7 @@ function parseArgs(): { botType: BotType; deploymentUrl?: string } {
         i++; // Skip next argument since we consumed it
       } else {
         console.error("❌ Error: --bot-type must be 'production' or 'preview'");
-        Deno.exit(1);
+        process.exit(1);
       }
     } else if (arg.startsWith("http")) {
       // Legacy support: URL passed as positional argument
@@ -52,8 +52,8 @@ async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<v
 
   // Get config with the appropriate bot type
   // Set BOT_TYPE environment variable temporarily to get the right config
-  const originalBotType = Deno.env.get("BOT_TYPE");
-  Deno.env.set("BOT_TYPE", botType);
+  const originalBotType = process.env.BOT_TYPE;
+  process.env.BOT_TYPE = botType;
   
   let config;
   try {
@@ -61,9 +61,9 @@ async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<v
   } finally {
     // Restore original BOT_TYPE
     if (originalBotType) {
-      Deno.env.set("BOT_TYPE", originalBotType);
+      process.env.BOT_TYPE = originalBotType;
     } else {
-      Deno.env.delete("BOT_TYPE");
+      delete process.env.BOT_TYPE;
     }
   }
 
@@ -80,7 +80,7 @@ async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<v
       console.error(`❌ Error getting deployment URL: ${error.message}`);
       console.log("\n💡 You can provide a manual URL as an argument:");
       console.log(`   bun run scripts/set-webhook.ts --bot-type ${botType} https://your-deployment.deno.dev`);
-      Deno.exit(1);
+      process.exit(1);
     }
   }
 
@@ -89,7 +89,7 @@ async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<v
     new URL(deploymentUrl);
   } catch {
     console.error("❌ Error: Invalid URL format. Please provide a valid URL like https://your-project.deno.dev");
-    Deno.exit(1);
+    process.exit(1);
   }
 
   const webhookUrl = `${deploymentUrl}/webhook/${config.webhookSecret}`;
@@ -130,7 +130,7 @@ async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<v
     }
   } else {
     console.error("❌ Failed to set webhook:", result);
-    Deno.exit(1);
+    process.exit(1);
   }
 }
 
@@ -138,9 +138,9 @@ async function main() {
   const { botType, deploymentUrl } = parseArgs();
 
   // Show help if requested
-  if (Deno.args.includes("--help") || Deno.args.includes("-h")) {
+  if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printUsage();
-    Deno.exit(0);
+    process.exit(0);
   }
 
   try {
@@ -148,7 +148,7 @@ async function main() {
   } catch (error) {
     console.error("❌ Error:", error.message);
     console.log("\n💡 Run with --help for usage information");
-    Deno.exit(1);
+    process.exit(1);
   }
 }
 

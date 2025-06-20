@@ -1,114 +1,46 @@
-name: Deploy Telegram Bot
+name: Deploy
 
 on:
   push:
-    branches: ["*"]
-  pull_request:
-    branches: [main]
+    branches:
+      - main
+    branches-ignore:
+      - main
 
 jobs:
-  deploy:
-    name: Deploy to Deno Deploy
+  production:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-
     steps:
-      - name: Checkout repository
+      - name: Deploy to production
+        uses: denoland/deployctl@v1
+        with:
+          project: telegram-interface
+          entrypoint: src/main.ts
+          token: ${{ secrets.DENO_DEPLOY_TOKEN }}
+
+  preview:
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Deno
         uses: denoland/setup-deno@v1
         with:
-          deno-version: v1.x
+          deno-version: v1.43.0
 
-      - name: Determine deployment type
-        id: deployment-type
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "type=production" >> $GITHUB_OUTPUT
-            echo "project=telegram-interface" >> $GITHUB_OUTPUT
-            echo "bot_type=production" >> $GITHUB_OUTPUT
-            echo "bot_token=${{ secrets.BOT_TOKEN }}" >> $GITHUB_OUTPUT
-            echo "webhook_secret=${{ secrets.WEBHOOK_SECRET_PRODUCTION }}" >> $GITHUB_OUTPUT
-            echo "🚀 Production deployment to main project" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "type=preview" >> $GITHUB_OUTPUT
-            echo "project=telegram-interface" >> $GITHUB_OUTPUT
-            echo "bot_type=preview" >> $GITHUB_OUTPUT
-            echo "bot_token=${{ secrets.PREVIEW_BOT_TOKEN }}" >> $GITHUB_OUTPUT
-            echo "webhook_secret=${{ secrets.WEBHOOK_SECRET_PREVIEW }}" >> $GITHUB_OUTPUT
-            echo "🔍 Preview deployment for branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Deploy to Deno Deploy
+      - name: Deploy preview
         uses: denoland/deployctl@v1
         with:
-          project: ${{ steps.deployment-type.outputs.project }}
+          project: telegram-interface-preview
           entrypoint: src/main.ts
-          root: .
-          production: ${{ steps.deployment-type.outputs.type == 'production' }}
-        env:
-          # Bot Configuration
-          BOT_TYPE: ${{ steps.deployment-type.outputs.bot_type }}
-          BOT_TOKEN: ${{ steps.deployment-type.outputs.bot_token }}
-          PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
-          
-          # Webhook Secrets
-          WEBHOOK_SECRET_PRODUCTION: ${{ secrets.WEBHOOK_SECRET_PRODUCTION }}
-          WEBHOOK_SECRET_PREVIEW: ${{ secrets.WEBHOOK_SECRET_PREVIEW }}
-          
-          # API Keys
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
-          
-          # Environment Settings
-          ENVIRONMENT: production
-          LOG_LEVEL: info
-          DENO_PROJECT_NAME: telegram-interface
+          token: ${{ secrets.DENO_DEPLOY_TOKEN }}
 
-      - name: Set Production Webhook
-        if: steps.deployment-type.outputs.type == 'production'
-        run: |
-          echo "🔗 Setting production webhook..."
-          deno run --allow-net --allow-env scripts/set-webhook.ts --bot-type production
+      - name: Update preview webhook
+        run: deno run --allow-net --allow-env scripts/update-preview-webhook.ts
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          WEBHOOK_SECRET_PRODUCTION: ${{ secrets.WEBHOOK_SECRET_PRODUCTION }}
           DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
-          DENO_PROJECT_NAME: telegram-interface
-
-      - name: Update Preview Webhook
-        if: steps.deployment-type.outputs.type == 'preview'
-        run: |
-          echo "🔗 Updating preview webhook to latest deployment..."
-          # Wait a moment for deployment to be available
-          sleep 10
-          deno run --allow-net --allow-env scripts/update-preview-webhook.ts
-        env:
           PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
           WEBHOOK_SECRET_PREVIEW: ${{ secrets.WEBHOOK_SECRET_PREVIEW }}
-          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
-          DENO_PROJECT_NAME: telegram-interface
-
-      - name: Verify Deployment
-        run: |
-          echo "✅ Deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
-          echo "**Deployment Details:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Type: ${{ steps.deployment-type.outputs.type }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Bot Type: ${{ steps.deployment-type.outputs.bot_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ steps.deployment-type.outputs.type }}" == "production" ]]; then
-            echo "- URL: https://telegram-interface.deno.dev" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- URL: Auto-generated preview URL" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Check Webhook Status
-        run: |
-          echo "📊 Checking webhook status..."
-          deno run --allow-net --allow-env scripts/check-webhook.ts --bot-type ${{ steps.deployment-type.outputs.bot_type }}
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}

@@ -3,7 +3,7 @@ import { getConfig } from "../src/utils/config.ts";
 type BotType = "production" | "preview" | "all";
 
 function parseArgs(): { botType: BotType } {
-  const args = Deno.args;
+  const args = process.argv.slice(2);
   let botType: BotType = "all"; // Default to showing all
 
   for (let i = 0; i < args.length; i++) {
@@ -16,7 +16,7 @@ function parseArgs(): { botType: BotType } {
         i++; // Skip next argument since we consumed it
       } else {
         console.error("❌ Error: --bot-type must be 'production', 'preview', or 'all'");
-        Deno.exit(1);
+        process.exit(1);
       }
     }
   }
@@ -42,8 +42,8 @@ async function checkWebhookForBot(botType: "production" | "preview"): Promise<vo
 
   // Get config with the appropriate bot type
   // Set BOT_TYPE environment variable temporarily to get the right config
-  const originalBotType = Deno.env.get("BOT_TYPE");
-  Deno.env.set("BOT_TYPE", botType);
+  const originalBotType = process.env.BOT_TYPE;
+  process.env.BOT_TYPE = botType;
   
   let config;
   try {
@@ -54,9 +54,9 @@ async function checkWebhookForBot(botType: "production" | "preview"): Promise<vo
   } finally {
     // Restore original BOT_TYPE
     if (originalBotType) {
-      Deno.env.set("BOT_TYPE", originalBotType);
+      process.env.BOT_TYPE = originalBotType;
     } else {
-      Deno.env.delete("BOT_TYPE");
+      delete process.env.BOT_TYPE;
     }
   }
 
@@ -91,9 +91,9 @@ async function main() {
   const { botType } = parseArgs();
 
   // Show help if requested
-  if (Deno.args.includes("--help") || Deno.args.includes("-h")) {
+  if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printUsage();
-    Deno.exit(0);
+    process.exit(0);
   }
 
   try {
@@ -106,7 +106,7 @@ async function main() {
   } catch (error) {
     console.error("❌ Error:", error.message);
     console.log("\n💡 Run with --help for usage information");
-    Deno.exit(1);
+    process.exit(1);
   }
 }
 

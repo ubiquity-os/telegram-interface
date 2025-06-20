@@ -39,8 +39,8 @@ export class DenoDeployApi {
   private baseUrl = "https://api.deno.com/v1";
 
   constructor(token?: string, projectName?: string) {
-    this.token = token || Deno.env.get("DENO_DEPLOY_TOKEN") || "";
-    this.projectName = projectName || Deno.env.get("DENO_PROJECT_NAME") || "telegram-interface";
+    this.token = token || process.env.DENO_DEPLOY_TOKEN || "";
+    this.projectName = projectName || process.env.DENO_PROJECT_NAME || "telegram-interface";
     
     if (!this.token) {
       throw new Error("DENO_DEPLOY_TOKEN environment variable is required");
@@ -77,9 +77,25 @@ export class DenoDeployApi {
   }
 
   async getDeployments(page = 1, limit = 20): Promise<DenoDeploymentsResponse> {
-    return await this.request<DenoDeploymentsResponse>(
+    const response = await this.request<any>(
       `/projects/${this.projectName}/deployments?page=${page}&limit=${limit}`
     );
+    
+    // Handle different response formats
+    if (Array.isArray(response)) {
+      // New format: array of deployments
+      return {
+        deployments: response,
+        hasMore: false,
+        page: 1,
+        total: response.length
+      };
+    } else if (response.deployments) {
+      // Old format: object with deployments property
+      return response as DenoDeploymentsResponse;
+    } else {
+      throw new Error("Unexpected response format from Deno Deploy API");
+    }
   }
 
   async getLatestNonMainDeploymentUrl(): Promise<string | null> {
@@ -98,6 +114,11 @@ export class DenoDeployApi {
         return null;
       }
 
+      // Sort deployments by createdAt date (newest first)
+      previewDeployments.sort((a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+  
       // Return the most recent preview deployment URL
       return previewDeployments[0].url;
     } catch (error) {

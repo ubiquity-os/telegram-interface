@@ -1,6 +1,11 @@
 {
+  "compilerOptions": {
+    "types": [
+      "https://deno.land/x/deno_types/v1.42.0/lib.deno.ns.d.ts"
+    ]
+  },
   "tasks": {
-    "dev": "deno run --watch --allow-net --allow-env --allow-read src/main.ts",
+    "dev": "deno run --watch --allow-net --allow-env --allow-read src/main.ts --allow-import",
     "test": "deno test --allow-net --allow-env",
     "fmt": "deno fmt",
     "lint": "deno lint"
