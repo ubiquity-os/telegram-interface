@@ -1,16 +1,36 @@
-import { getConfig } from "../src/utils/config.ts";
+import { load } from "https://deno.land/std@0.213.0/dotenv/mod.ts";
+
+// Load environment variables
+await load();
+
+// Get webhook-specific config without requiring all API keys
+const config = {
+  botToken: Deno.env.get("BOT_TOKEN") || "",
+  previewBotToken: Deno.env.get("PREVIEW_BOT_TOKEN") || "",
+  webhookSecret: Deno.env.get("WEBHOOK_SECRET") || "",
+};
+
+// Validate required webhook config
+if (!config.botToken) {
+  console.error("❌ BOT_TOKEN is required");
+  Deno.exit(1);
+}
+
+if (!config.webhookSecret) {
+  console.error("❌ WEBHOOK_SECRET is required");
+  Deno.exit(1);
+}
 
 // Bot configurations
-const config = getConfig();
 const BOTS = {
   production: {
     name: "Production Bot",
-    token: config.botToken, // From .env
+    token: config.botToken,
     defaultUrl: "https://telegram-interface.deno.dev"
   },
   preview: {
     name: "Preview Bot", 
-    token: config.previewBotToken || "", // From .env
+    token: config.previewBotToken,
     defaultUrl: null // Will be provided as argument
   }
 };
