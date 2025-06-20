@@ -1,138 +1,369 @@
-# Telegram Bot Deployment Guide for Deno Deploy
+# Dual Deployment Setup Guide
 
-This guide will walk you through deploying the Telegram bot to Deno Deploy.
+This guide provides complete setup instructions for the dual deployment system with separate production and preview Telegram bots.
 
 ## Prerequisites
 
-- GitHub repository with the code (✓ Complete: https://github.com/ubiquity-os/telegram-interface)
+- GitHub account with repository access
+- Two Telegram bots (production and preview) created via [@BotFather](https://t.me/botfather)
 - Deno Deploy account (free at https://deno.com/deploy)
-- Bot token and webhook secret ready
+- OpenRouter API key for AI functionality
 
-## Step 1: Create Deno Deploy Account
+## Telegram Bot Setup
 
+### Create Two Telegram Bots
+
+You need **two separate bots** for the dual deployment system:
+
+1. **Production Bot**: For live production environment
+   - Message [@BotFather](https://t.me/botfather)
+   - Send `/newbot` and follow prompts
+   - Name it something like "YourProject Bot"
+   - Save the bot token as `BOT_TOKEN`
+
+2. **Preview Bot**: For testing feature branches
+   - Message [@BotFather](https://t.me/botfather) again
+   - Send `/newbot` and follow prompts  
+   - Name it something like "YourProject Preview Bot"
+   - Save the bot token as `PREVIEW_BOT_TOKEN`
+
+## Deno Deploy Project Setup
+
+### 1. Create Deno Deploy Account
 1. Go to https://deno.com/deploy
 2. Sign in with your GitHub account
 3. You'll be redirected to the Deno Deploy dashboard
 
-## Step 2: Create New Project
-
+### 2. Create New Project
 1. Click "New Project" on the Deno Deploy dashboard
 2. Select "Deploy from GitHub"
-3. Authorize Deno Deploy to access your GitHub repositories if prompted
-4. Search for and select `ubiquity-os/telegram-interface`
-5. Keep the default settings:
-   - Production Branch: `main`
-   - Entry Point: `src/main.ts` (should be auto-detected)
+3. Authorize Deno Deploy to access your GitHub repositories
+4. Search for and select your repository (e.g., `ubiquity-os/telegram-interface`)
+5. Configure project settings:
+   - **Production Branch**: `main`
+   - **Entry Point**: `src/main.ts` (should be auto-detected)
+   - **Project Name**: `telegram-interface` (or your preferred name)
 6. Click "Link"
 
-## Step 3: Configure Environment Variables
+### 3. Get Deno Deploy API Token
+1. Go to your Deno Deploy dashboard
+2. Click on your profile/account settings
+3. Generate a new API token
+4. Save this as `DENO_DEPLOY_TOKEN` for GitHub secrets
 
-In your Deno Deploy project dashboard:
+## GitHub Repository Secrets
 
-1. Go to the "Settings" tab
-2. Scroll down to "Environment Variables"
-3. Add the following variables:
+Configure these secrets in your GitHub repository settings (Settings → Secrets and variables → Actions):
 
-| Variable | Value |
-|----------|-------|
-| BOT_TOKEN | 7990292303:AAEUDZyTlmdwCqHedi1tosPvXdNnYI5XMYY |
-| WEBHOOK_SECRET | 8a3f5d9e2c7b1a4f6e8d3c9b5a7f2e1d4c8b6a3f9e5d2c7b1a4f6e8d3c9b5a7f |
-| LOG_LEVEL | info |
-| ENVIRONMENT | production |
+### Required Secrets Table
 
-4. Click "Save" after adding all variables
+| Secret Name | Description | Example Value |
+|-------------|-------------|---------------|
+| `BOT_TOKEN` | Production Telegram bot token | `1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ` |
+| `PREVIEW_BOT_TOKEN` | Preview Telegram bot token | `0987654321:ZYXwvuTSRqpONMlkjIHGfeDCBA` |
+| `WEBHOOK_SECRET_PRODUCTION` | Production webhook secret | `prod_webhook_secret_random_string_2024` |
+| `WEBHOOK_SECRET_PREVIEW` | Preview webhook secret | `preview_webhook_secret_random_string_2024` |
+| `OPENROUTER_API_KEY` | OpenRouter AI service API key | `sk-or-v1-abc123def456ghi789...` |
+| `DENO_DEPLOY_TOKEN` | Deno Deploy API access token | `ddp_1234567890abcdef...` |
 
-## Step 4: Deploy the Application
+### Generating Webhook Secrets
 
-1. The deployment should start automatically after linking
-2. If not, go to the "Deployments" tab and click "Deploy"
-3. Wait for the deployment to complete (usually takes 1-2 minutes)
-4. Note your deployment URL (format: `https://your-project-name.deno.dev`)
-
-## Step 5: Register Webhook with Telegram
-
-Once deployed, you need to tell Telegram where to send updates. You have two options:
-
-### Option A: Using the provided script (Recommended)
-
-1. Update the webhook registration script with your deployment URL:
+Generate random webhook secrets using any of these methods:
 
 ```bash
-# In your local project directory
-cd /Users/nv/repos/ubiquity-os/telegram-interface
+# Option 1: Using openssl
+openssl rand -hex 32
 
-# Edit the script to use your Deno Deploy URL
-# Replace 'your-project-name' with your actual project name
-deno run --allow-net --allow-env scripts/set-webhook.ts https://your-project-name.deno.dev
+# Option 2: Using Node.js
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+# Option 3: Online generator
+# Visit https://www.uuidgenerator.net/random-string-generator
 ```
 
-### Option B: Manual registration using curl
+## Environment Configuration
+
+### Local Development Setup
+
+Create a `.env` file for local development:
 
 ```bash
-# Replace YOUR_PROJECT_NAME with your actual Deno Deploy project name
-curl -X POST https://api.telegram.org/bot7990292303:AAEUDZyTlmdwCqHedi1tosPvXdNnYI5XMYY/setWebhook \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://YOUR_PROJECT_NAME.deno.dev/webhook/8a3f5d9e2c7b1a4f6e8d3c9b5a7f2e1d4c8b6a3f9e5d2c7b1a4f6e8d3c9b5a7f",
-    "drop_pending_updates": true
-  }'
+# Copy from example
+cp .env.example .env
+
+# Edit .env with your values
+BOT_TYPE=production
+BOT_TOKEN=your_production_bot_token_here
+PREVIEW_BOT_TOKEN=your_preview_bot_token_here
+WEBHOOK_SECRET_PRODUCTION=your_production_webhook_secret
+WEBHOOK_SECRET_PREVIEW=your_preview_webhook_secret
+OPENROUTER_API_KEY=your_openrouter_api_key
+DEPLOYMENT_URL=https://your-project-name.deno.dev
+DENO_DEPLOY_TOKEN=your_deno_deploy_token
+DENO_PROJECT_NAME=telegram-interface
+ENVIRONMENT=development
+LOG_LEVEL=info
 ```
 
-You should receive a response like:
-```json
-{"ok":true,"result":true,"description":"Webhook was set"}
+### Deno Deploy Environment Variables
+
+Set these in your Deno Deploy project dashboard (Project Settings → Environment Variables):
+
+```bash
+# Bot Configuration (set by GitHub Actions automatically)
+BOT_TYPE=production  # or preview (managed by CI/CD)
+BOT_TOKEN=${BOT_TOKEN}
+PREVIEW_BOT_TOKEN=${PREVIEW_BOT_TOKEN}
+
+# Webhook Configuration  
+WEBHOOK_SECRET_PRODUCTION=${WEBHOOK_SECRET_PRODUCTION}
+WEBHOOK_SECRET_PREVIEW=${WEBHOOK_SECRET_PREVIEW}
+
+# API Keys
+OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+
+# Environment Settings
+ENVIRONMENT=production
+LOG_LEVEL=info
 ```
 
-## Step 6: Verify Deployment
+> **Note**: GitHub Actions automatically sets the appropriate `BOT_TYPE` and bot token based on the deployment branch.
 
-1. Check the health endpoint:
-   ```
-   https://your-project-name.deno.dev/health
-   ```
-   Should return: `{"status":"ok","timestamp":"..."}`
+## Deployment Process
 
-2. Send a message to your bot on Telegram
-3. Check the Deno Deploy logs for incoming requests
+### Automatic Deployment
 
-## Monitoring and Logs
+The system deploys automatically based on Git branches:
 
-- View logs in the Deno Deploy dashboard under the "Logs" tab
-- Logs are real-time and show all incoming requests and responses
-- Use the LOG_LEVEL environment variable to control log verbosity
+#### Production Deployment
+1. **Trigger**: Push to `main` branch
+2. **Result**: 
+   - Deploys to `https://telegram-interface.deno.dev` 
+   - Uses production bot (`BOT_TOKEN`)
+   - Sets production webhook automatically
+
+#### Preview Deployment  
+1. **Trigger**: Push to any feature branch
+2. **Result**:
+   - Deploys to `https://telegram-interface-{hash}.deno.dev`
+   - Uses preview bot (`PREVIEW_BOT_TOKEN`) 
+   - Sets preview webhook automatically
+
+#### Cleanup Process
+1. **Trigger**: Close Pull Request
+2. **Result**: Removes preview bot webhook (deployment remains but disconnected)
+
+### Manual Deployment Procedures
+
+#### Deploy Production Bot
+```bash
+# 1. Push to main branch (triggers automatic deployment)
+git checkout main
+git push origin main
+
+# 2. Verify production webhook (optional)
+deno run --allow-net --allow-env scripts/check-webhook.ts --bot-type production
+```
+
+#### Deploy Preview Bot
+```bash
+# 1. Create and push feature branch
+git checkout -b feature/my-new-feature
+git push origin feature/my-new-feature
+
+# 2. Verify preview webhook (optional)  
+deno run --allow-net --allow-env scripts/check-webhook.ts --bot-type preview
+```
+
+#### Manual Webhook Setup (if needed)
+```bash
+# Set production webhook
+deno run --allow-net --allow-env scripts/set-webhook.ts --bot-type production
+
+# Update preview webhook to latest deployment
+deno run --allow-net --allow-env scripts/update-preview-webhook.ts
+```
+
+## Verification Steps
+
+### 1. Check Health Endpoints
+
+**Production**:
+```bash
+curl https://telegram-interface.deno.dev/health
+# Expected: {"status":"ok","timestamp":"..."}
+```
+
+**Preview** (replace with actual preview URL):
+```bash
+curl https://telegram-interface-abc123.deno.dev/health  
+# Expected: {"status":"ok","timestamp":"..."}
+```
+
+### 2. Verify Webhook Status
+
+```bash
+# Check both bots
+deno run --allow-net --allow-env scripts/check-webhook.ts
+
+# Check specific bot
+deno run --allow-net --allow-env scripts/check-webhook.ts --bot-type production
+deno run --allow-net --allow-env scripts/check-webhook.ts --bot-type preview
+```
+
+**Expected Output**:
+```
+✅ Production Bot Webhook Status:
+- URL: https://telegram-interface.deno.dev/webhook/your_webhook_secret
+- Pending updates: 0
+- Last error: None
+
+✅ Preview Bot Webhook Status:  
+- URL: https://telegram-interface-abc123.deno.dev/webhook/your_preview_secret
+- Pending updates: 0
+- Last error: None
+```
+
+### 3. Test Bot Functionality
+
+**Production Bot**:
+1. Send a message to your production bot on Telegram
+2. Verify it responds with AI-generated content
+3. Check Deno Deploy logs for activity
+
+**Preview Bot**:
+1. Send a message to your preview bot on Telegram  
+2. Verify it responds with AI-generated content
+3. Check Deno Deploy preview deployment logs
 
 ## Troubleshooting
 
-### Bot not responding
+### Common Issues
+
+#### 1. "BOT_TOKEN is required" Error
+**Cause**: Missing or incorrect bot token configuration
+
+**Solutions**:
+- Verify `BOT_TOKEN` is set in GitHub secrets
+- Check `PREVIEW_BOT_TOKEN` is set for preview deployments
+- Ensure tokens are valid from [@BotFather](https://t.me/botfather)
+
+```bash
+# Test token validity
+curl https://api.telegram.org/bot<YOUR_TOKEN>/getMe
+```
+
+#### 2. "Webhook setup failed" Error
+**Cause**: Webhook configuration issues
+
+**Solutions**:
+- Check webhook secrets are set correctly
+- Verify deployment URL is accessible
+- Ensure bot tokens match the webhook secrets
+
+```bash
+# Check webhook status
+curl https://api.telegram.org/bot<YOUR_TOKEN>/getWebhookInfo
+```
+
+#### 3. "Bot not responding" Issue
+**Cause**: Multiple possible issues
+
+**Debug Steps**:
 1. Check Deno Deploy logs for errors
-2. Verify webhook is registered correctly:
-   ```bash
-   curl https://api.telegram.org/bot7990292303:AAEUDZyTlmdwCqHedi1tosPvXdNnYI5XMYY/getWebhookInfo
-   ```
-3. Ensure environment variables are set correctly
+2. Verify health endpoint responds
+3. Test webhook URL accessibility
+4. Confirm OpenRouter API key is valid
 
-### Webhook errors
-- Verify the WEBHOOK_SECRET in environment variables matches the one in your webhook URL
-- Check that the deployment URL is correct and accessible
+```bash
+# Check deployment logs in Deno Deploy dashboard
+# Test health endpoint
+curl https://your-deployment.deno.dev/health
 
-### Deployment fails
-- Check the GitHub Actions tab in your repository for build errors
-- Ensure all TypeScript files compile without errors
-- Verify deno.json configuration is valid
+# Check webhook  
+deno run --allow-net --allow-env scripts/check-webhook.ts --bot-type production
+```
 
-## Automatic Deployments
+#### 4. "Deployment failed" Error
+**Cause**: GitHub Actions or Deno Deploy issues
 
-Your project is configured with GitHub Actions to automatically deploy on push to the main branch. Every commit to main will trigger a new deployment.
+**Solutions**:
+- Check GitHub Actions workflow logs
+- Verify all required secrets are set
+- Ensure Deno Deploy project is properly linked
+- Check TypeScript compilation errors
 
-## Security Notes
+#### 5. Preview Webhook Not Updating
+**Cause**: Preview deployment webhook automation failure
 
-- Never commit sensitive tokens to your repository
-- Keep your webhook secret truly secret
-- Regularly rotate your bot token if compromised
-- Use environment variables for all sensitive data
+**Solutions**:
+```bash
+# Manually update preview webhook
+deno run --allow-net --allow-env scripts/update-preview-webhook.ts
+
+# Check if preview deployment exists
+# (Should see preview URL in Deno Deploy dashboard)
+```
+
+### Environment-Specific Issues
+
+#### Local Development
+```bash
+# Test configuration loading
+deno run --allow-env test-config.ts
+
+# Run bot locally with polling (for testing)
+BOT_TYPE=preview deno task dev
+```
+
+#### GitHub Actions Failures
+1. Check workflow logs in GitHub Actions tab
+2. Verify all secrets are configured
+3. Ensure branch permissions are correct
+4. Check Deno Deploy integration
+
+#### Deno Deploy Issues
+1. Check deployment logs in Deno Deploy dashboard
+2. Verify project settings and environment variables
+3. Test direct deployment from Deno Deploy interface
+
+## Advanced Configuration
+
+### Custom Deployment URLs
+If you need to use custom URLs or deploy to different projects:
+
+```bash
+# Set production webhook with custom URL
+deno run --allow-net --allow-env scripts/set-webhook.ts --bot-type production https://custom.domain.com
+
+# Update environment variables
+DENO_PROJECT_NAME=your-custom-project-name
+```
+
+### Multiple Environment Setup
+For additional environments (staging, development):
+
+1. Create additional bots via [@BotFather](https://t.me/botfather)
+2. Add corresponding secrets to GitHub
+3. Modify GitHub Actions workflows for additional branches
+4. Update configuration logic in [`src/utils/config.ts`](../src/utils/config.ts)
+
+### Security Best Practices
+
+1. **Rotate Tokens Regularly**: Update bot tokens and webhook secrets periodically
+2. **Monitor Access**: Check Deno Deploy access logs regularly  
+3. **Limit Permissions**: Use minimal required permissions for API tokens
+4. **Secure Secrets**: Never commit secrets to version control
+5. **Webhook Validation**: Always use webhook secrets for request validation
 
 ## Next Steps
 
-- Monitor your bot's performance in the Deno Deploy dashboard
-- Set up alerts for deployment failures
-- Consider implementing more bot features
-- Add error tracking and monitoring services
+After successful deployment:
+
+1. **Monitor Performance**: Check Deno Deploy dashboards regularly
+2. **Set Up Alerts**: Configure notifications for deployment failures
+3. **Document Changes**: Update this guide with any custom modifications
+4. **Test Workflows**: Regularly test the full deployment pipeline
+5. **Backup Configuration**: Document all secrets and configuration for disaster recovery
+
+The dual deployment system is now ready for development and production use!

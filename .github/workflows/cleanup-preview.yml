@@ -1,0 +1,62 @@
+name: Cleanup Preview Deployments
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup:
+    name: Cleanup Preview Resources
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.ref != 'main'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Remove Preview Bot Webhook
+        run: |
+          echo "🧹 Cleaning up preview bot webhook..."
+          echo "Removing webhook for closed PR: ${{ github.event.pull_request.title }}"
+          
+          # Remove the webhook by setting it to empty
+          deno run --allow-net --allow-env -A - <<'EOF'
+          const response = await fetch(
+            `https://api.telegram.org/bot${Deno.env.get("PREVIEW_BOT_TOKEN")}/deleteWebhook`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                drop_pending_updates: true
+              })
+            }
+          );
+          
+          const result = await response.json();
+          
+          if (result.ok) {
+            console.log("✅ Preview bot webhook successfully removed");
+            console.log("📋 Response:", result);
+          } else {
+            console.log("ℹ️ Webhook cleanup result:", result);
+          }
+          EOF
+        env:
+          PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
+        continue-on-error: true
+
+      - name: Log Cleanup Summary
+        run: |
+          echo "🎯 **Preview Cleanup Summary**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR:** ${{ github.event.pull_request.title }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.event.pull_request.head.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Action:** Webhook removed from preview bot" >> $GITHUB_STEP_SUMMARY
+          echo "- **Note:** Preview deployment will remain on Deno Deploy but webhook is disconnected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ℹ️ *Preview deployments on Deno Deploy are automatically cleaned up after inactivity*" >> $GITHUB_STEP_SUMMARY
