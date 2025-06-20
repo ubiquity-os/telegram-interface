@@ -24,10 +24,16 @@ jobs:
         with:
           deno-version: v1.43.0
 
+      - name: Verify Token Access
+        run: |
+          echo "Verifying token access to project..."
+          curl -s -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
+          https://api.deno.com/v1/projects/UbiquityOS/telegram-interface | jq .
+
       - name: Deploy
-        uses: denoland/deployctl@v1
+        uses: denoland/deployctl@v1.13.1
         with:
-          project: telegram-interface
+          project: UbiquityOS/telegram-interface
           entrypoint: src/main.ts
           root: "."
           include: "**"
