@@ -63,7 +63,7 @@ export class DenoDeployApi {
         throw new Error(`Deno Deploy API error (${response.status}): ${errorText}`);
       }
 
-      return await response.json();
+      return await response.json() as T;
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Failed to fetch from Deno Deploy API: ${error.message}`);
@@ -150,4 +150,21 @@ export class DenoDeployApi {
 export async function getDeploymentUrl(isProduction: boolean): Promise<string> {
   const api = new DenoDeployApi();
   return await api.getLatestDeploymentUrl(isProduction);
+}
+
+// Temporary debug function
+async function debugProject() {
+  try {
+    const api = new DenoDeployApi();
+    const project = await api.getProject();
+    console.log("Project Details:", project);
+    const deployments = await api.getDeployments();
+    console.log("Latest Deployments:", deployments);
+  } catch (error) {
+    console.error("Debug Error:", error);
+  }
+}
+
+if (import.meta.main) {
+  debugProject();
 }

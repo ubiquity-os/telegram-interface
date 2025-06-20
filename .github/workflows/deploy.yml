@@ -28,7 +28,9 @@ jobs:
         with:
           project: telegram-interface
           entrypoint: src/main.ts
-          production: ${{ matrix.environment == 'production' }}
+          root: "."
+          include: ["**"]
+          exclude: ["**.spec.ts"]
 
       - name: Update webhook
         run: deno run --allow-net --allow-env scripts/update-webhook.ts
