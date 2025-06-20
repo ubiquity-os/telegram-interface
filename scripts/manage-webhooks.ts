@@ -1,9 +1,5 @@
-import { load } from "https://deno.land/std@0.213.0/dotenv/mod.ts";
-
-// Load environment variables
-await load();
-
-// Get webhook-specific config without requiring all API keys
+// Get webhook-specific config directly from environment
+// No need to load .env file in CI/CD environment
 const config = {
   botToken: Deno.env.get("BOT_TOKEN") || "",
   previewBotToken: Deno.env.get("PREVIEW_BOT_TOKEN") || "",
