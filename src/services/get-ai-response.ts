@@ -18,7 +18,7 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
   };
 
   // Build context with conversation history
-  const messages = conversationHistory.buildContext(
+  const messages = await conversationHistory.buildContext(
     chatId,
     userMessageObj,
     systemPrompt,
@@ -32,8 +32,8 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
   const response = await callOpenRouter(messages, MODEL);
   
   // Store user message and AI response in conversation history
-  conversationHistory.addMessage(chatId, userMessageObj);
-  conversationHistory.addMessage(chatId, {
+  await conversationHistory.addMessage(chatId, userMessageObj);
+  await conversationHistory.addMessage(chatId, {
     role: "assistant",
     content: response,
   });

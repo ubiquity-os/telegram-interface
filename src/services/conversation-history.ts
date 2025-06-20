@@ -6,59 +6,84 @@ interface ConversationEntry {
 }
 
 class ConversationHistoryService {
-  private conversations: Map<number, ConversationEntry[]>;
   private maxConversationAge: number; // in milliseconds
   private maxEntriesPerConversation: number;
+  private kv: Deno.Kv | null = null;
 
   constructor(
     maxConversationAge = 24 * 60 * 60 * 1000, // 24 hours
     maxEntriesPerConversation = 1000
   ) {
-    this.conversations = new Map();
     this.maxConversationAge = maxConversationAge;
     this.maxEntriesPerConversation = maxEntriesPerConversation;
   }
 
-  // Add a message to conversation history
-  addMessage(chatId: number, message: OpenRouterMessage): void {
-    const now = Date.now();
-    
-    if (!this.conversations.has(chatId)) {
-      this.conversations.set(chatId, []);
+  // Initialize KV connection
+  private async getKv(): Promise<Deno.Kv> {
+    if (!this.kv) {
+      this.kv = await Deno.openKv();
     }
+    return this.kv;
+  }
 
-    const conversation = this.conversations.get(chatId)!;
+  // Generate KV key for a chat's messages
+  private getChatKey(chatId: number): string[] {
+    return ["chat", chatId.toString(), "messages"];
+  }
+
+  // Add a message to conversation history
+  async addMessage(chatId: number, message: OpenRouterMessage): Promise<void> {
+    const kv = await this.getKv();
+    const key = this.getChatKey(chatId);
+    const now = Date.now();
+
+    // Get existing conversation
+    const result = await kv.get<ConversationEntry[]>(key);
+    const conversation = result.value || [];
+
+    // Add new message
     conversation.push({
       timestamp: now,
       message,
     });
 
     // Clean up old messages and limit size
-    this.cleanupConversation(chatId);
+    const cleaned = this.cleanupConversationSync(conversation);
+
+    // Store updated conversation
+    await kv.set(key, cleaned);
   }
 
   // Get conversation history for a chat
-  getHistory(chatId: number): OpenRouterMessage[] {
-    const conversation = this.conversations.get(chatId);
-    if (!conversation) {
+  async getHistory(chatId: number): Promise<OpenRouterMessage[]> {
+    const kv = await this.getKv();
+    const key = this.getChatKey(chatId);
+
+    const result = await kv.get<ConversationEntry[]>(key);
+    if (!result.value) {
       return [];
     }
 
     // Clean up old messages before returning
-    this.cleanupConversation(chatId);
+    const cleaned = this.cleanupConversationSync(result.value);
+    
+    // Update KV if we cleaned any messages
+    if (cleaned.length !== result.value.length) {
+      await kv.set(key, cleaned);
+    }
 
-    return conversation.map(entry => entry.message);
+    return cleaned.map(entry => entry.message);
   }
 
   // Build context with token limit (newest messages first)
-  buildContext(
+  async buildContext(
     chatId: number,
     currentMessage: OpenRouterMessage,
     systemPrompt: OpenRouterMessage,
     maxTokens: number,
     tokenCounter: (text: string) => number
-  ): OpenRouterMessage[] {
-    const history = this.getHistory(chatId);
+  ): Promise<OpenRouterMessage[]> {
+    const history = await this.getHistory(chatId);
     const messages: OpenRouterMessage[] = [];
     
     // Calculate tokens for system prompt and current message
@@ -81,52 +106,66 @@ class ConversationHistoryService {
     return [systemPrompt, ...messages, currentMessage];
   }
 
-  // Clean up old messages from a conversation
-  private cleanupConversation(chatId: number): void {
-    const conversation = this.conversations.get(chatId);
-    if (!conversation) return;
-
+  // Clean up old messages from a conversation (synchronous helper)
+  private cleanupConversationSync(conversation: ConversationEntry[]): ConversationEntry[] {
     const now = Date.now();
     const cutoffTime = now - this.maxConversationAge;
 
     // Remove messages older than maxConversationAge
-    const filtered = conversation.filter(entry => entry.timestamp > cutoffTime);
+    let filtered = conversation.filter(entry => entry.timestamp > cutoffTime);
 
     // If we still have too many messages, keep only the most recent ones
     if (filtered.length > this.maxEntriesPerConversation) {
-      const kept = filtered.slice(-this.maxEntriesPerConversation);
-      this.conversations.set(chatId, kept);
-    } else {
-      this.conversations.set(chatId, filtered);
+      filtered = filtered.slice(-this.maxEntriesPerConversation);
     }
 
-    // Remove empty conversations
-    if (filtered.length === 0) {
-      this.conversations.delete(chatId);
-    }
+    return filtered;
   }
 
   // Clear conversation history for a specific chat
-  clearHistory(chatId: number): void {
-    this.conversations.delete(chatId);
+  async clearHistory(chatId: number): Promise<void> {
+    const kv = await this.getKv();
+    const key = this.getChatKey(chatId);
+    await kv.delete(key);
   }
 
-  // Clear all conversation histories
-  clearAll(): void {
-    this.conversations.clear();
+  // Clear all conversation histories (use with caution)
+  async clearAll(): Promise<void> {
+    const kv = await this.getKv();
+    
+    // List all chat keys and delete them
+    const iter = kv.list({ prefix: ["chat"] });
+    for await (const entry of iter) {
+      await kv.delete(entry.key);
+    }
   }
 
   // Get statistics about stored conversations
-  getStats(): { totalChats: number; totalMessages: number } {
+  async getStats(): Promise<{ totalChats: number; totalMessages: number }> {
+    const kv = await this.getKv();
+    let totalChats = 0;
     let totalMessages = 0;
-    for (const conversation of this.conversations.values()) {
-      totalMessages += conversation.length;
+
+    const iter = kv.list<ConversationEntry[]>({ prefix: ["chat"] });
+    for await (const entry of iter) {
+      if (entry.value && entry.key[2] === "messages") {
+        totalChats++;
+        totalMessages += entry.value.length;
+      }
     }
     
     return {
-      totalChats: this.conversations.size,
+      totalChats,
       totalMessages,
     };
+  }
+
+  // Close KV connection (for cleanup)
+  async close(): Promise<void> {
+    if (this.kv) {
+      this.kv.close();
+      this.kv = null;
+    }
   }
 }
 
