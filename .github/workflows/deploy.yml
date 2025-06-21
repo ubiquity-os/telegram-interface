@@ -13,7 +13,7 @@ jobs:
           deno-version: "1.43.x"
 
       - name: Install deployctl
-        run: deno install -A -r https://deno.land/x/deploy/deployctl.ts
+        run: deno install -A --no-check -r https://deno.land/x/deploy@1.12.0/deployctl.ts
 
       - name: Set environment
         run: |
