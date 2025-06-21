@@ -1,46 +1,67 @@
 /// <reference types="deno-types" />
-import { getDeploymentUrl } from "./deno-deploy-api.ts";
 
-const DRY_RUN = Deno.args.includes("--dry-run");
+// Manual argument parsing
+let botToken: string | null = null;
+let webhookSecret: string | null = null;
+let deploymentUrl: string | null = null;
+let dryRun = false;
+
+const args = Deno.args;
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--bot-token" && i + 1 < args.length) {
+    botToken = args[i+1];
+    i++;
+  } else if (args[i] === "--webhook-secret" && i + 1 < args.length) {
+    webhookSecret = args[i+1];
+    i++;
+  } else if (args[i] === "--deployment-url" && i + 1 < args.length) {
+    deploymentUrl = args[i+1];
+    i++;
+  } else if (args[i] === "--dry-run") {
+    dryRun = true;
+  }
+}
 
 console.log("=== WEBHOOK UPDATE DEBUG ===");
-console.log("Dry run mode:", DRY_RUN);
-console.log("Environment variables:");
-console.log(`- IS_PRODUCTION: ${Deno.env.get("IS_PRODUCTION")}`);
-console.log(`- BOT_TOKEN: ${Deno.env.get("BOT_TOKEN") ? "*****" : "MISSING"}`);
-console.log(`- WEBHOOK_SECRET: ${Deno.env.get("WEBHOOK_SECRET") ? "*****" : "MISSING"}`);
+console.log("Raw arguments:", Deno.args);
+console.log("Dry run mode:", dryRun);
+console.log("Arguments:");
+console.log(`- Bot Token: ${botToken ? "*****" : "MISSING"}`);
+console.log(`- Webhook Secret: ${webhookSecret ? "*****" : "MISSING"}`);
+console.log(`- Deployment URL: ${deploymentUrl || "MISSING"}`);
 
-if (!Deno.env.get("BOT_TOKEN")) {
-  console.error("ERROR: BOT_TOKEN environment variable is required");
+// Validate required arguments
+if (!botToken) {
+  console.error("ERROR: Bot token is required (use --bot-token)");
   Deno.exit(1);
 }
-if (!Deno.env.get("WEBHOOK_SECRET")) {
-  console.error("ERROR: WEBHOOK_SECRET environment variable is required");
+if (!webhookSecret) {
+  console.error("ERROR: Webhook secret is required (use --webhook-secret)");
+  Deno.exit(1);
+}
+if (!deploymentUrl) {
+  console.error("ERROR: Deployment URL is required (use --deployment-url)");
   Deno.exit(1);
 }
 
 try {
-  console.log("\nFetching deployment URL...");
-  const isProduction = Deno.env.get("IS_PRODUCTION") === "true";
-  const deploymentUrl = await getDeploymentUrl(isProduction);
-  console.log(`Resolved deployment URL: ${deploymentUrl}`);
   const webhookUrl = `${deploymentUrl}/webhook`;
 
-  if (DRY_RUN) {
+  if (dryRun) {
     console.log("\nDRY RUN RESULTS:");
-    console.log(`Would set ${isProduction ? "production" : "preview"} webhook to: ${webhookUrl}`);
-    console.log("Would use token:", Deno.env.get("BOT_TOKEN") ? "*****" : "MISSING");
-    console.log("Would use secret:", Deno.env.get("WEBHOOK_SECRET") ? "*****" : "MISSING");
+    console.log(`Would set webhook to: ${webhookUrl}`);
+    console.log("Would use token: *****");
+    console.log("Would use secret: *****");
     Deno.exit(0);
   }
 
-  console.log(`\nSetting ${isProduction ? "production" : "preview"} webhook...`);
-  const response = await fetch(`https://api.telegram.org/bot${Deno.env.get("BOT_TOKEN")}/setWebhook`, {
+  console.log(`\nSetting webhook to: ${webhookUrl}`);
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       url: webhookUrl,
-      secret_token: Deno.env.get("WEBHOOK_SECRET"),
+      secret_token: webhookSecret,
       drop_pending_updates: true,
     }),
   });
@@ -57,3 +78,5 @@ try {
   console.error("\nFATAL ERROR:", error);
   Deno.exit(1);
 }
+
+export {};

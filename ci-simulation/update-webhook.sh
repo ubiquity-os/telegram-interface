@@ -19,11 +19,15 @@ echo "🔗 Updating Telegram webhook for $ENVIRONMENT environment..."
 DEPLOYMENT_URL="https://$PROJECT_NAME.deno.dev"
 echo "🌐 Using deployment URL: $DEPLOYMENT_URL"
 
-# Run webhook update script with all required env vars
-BOT_TOKEN=$BOT_TOKEN \
-WEBHOOK_SECRET=$WEBHOOK_SECRET \
-DEPLOYMENT_URL=$DEPLOYMENT_URL \
-deno run --allow-net --allow-env ../scripts/update-webhook.ts
+# Run webhook update script with arguments
+deno run \
+  --allow-net \
+  --allow-env \
+  --allow-read \
+  ../scripts/update-webhook.ts \
+    --bot-token "$BOT_TOKEN" \
+    --webhook-secret "$WEBHOOK_SECRET" \
+    --deployment-url "$DEPLOYMENT_URL"
 
 UPDATE_STATUS=$?
 
