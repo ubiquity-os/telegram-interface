@@ -1,10 +1,10 @@
 #!/bin/bash
-# CI Simulation - Deployment Script
+# CI Deployment Script
 # Usage: ./deploy.sh [production|preview]
 
 ENVIRONMENT=$1
 if [ -z "$ENVIRONMENT" ]; then
-  echo "Usage: $0 [production|preview]" >&2
+  echo "❌ Usage: $0 [production|preview]" >&2
   exit 1
 fi
 
@@ -16,32 +16,22 @@ if ! command -v deployctl &> /dev/null; then
   exit 1
 fi
 
-# Load environment configuration
-if [ ! -f ".env" ]; then
-  echo "❌ Error: .env file not found" >&2
-  exit 1
-fi
-source .env
-
-# Verify token is set
+# Verify required variables
 if [ -z "$DENO_DEPLOY_TOKEN" ]; then
-  echo "❌ Error: DENO_DEPLOY_TOKEN is not set" >&2
+  echo "❌ Error: DENO_DEPLOY_TOKEN is required" >&2
   exit 1
 fi
 
-# Set project-specific variables
+if [ -z "$DENO_PROJECT_NAME" ] || [ -z "$DENO_PREVIEW_PROJECT_NAME" ]; then
+  echo "❌ Error: Project names must be set" >&2
+  exit 1
+fi
+
+# Set target project
 if [ "$ENVIRONMENT" = "production" ]; then
-  if [ -z "$DENO_PROJECT_NAME" ]; then
-    echo "❌ Error: DENO_PROJECT_NAME is not set" >&2
-    exit 1
-  fi
   PROJECT_NAME="$DENO_PROJECT_NAME"
   echo "🏭 Deploying to production project: $PROJECT_NAME"
 else
-  if [ -z "$DENO_PREVIEW_PROJECT_NAME" ]; then
-    echo "❌ Error: DENO_PREVIEW_PROJECT_NAME is not set" >&2
-    exit 1
-  fi
   PROJECT_NAME="$DENO_PREVIEW_PROJECT_NAME"
   echo "🛠️ Deploying to preview project: $PROJECT_NAME"
   CREATE_FLAG="--create"

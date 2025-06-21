@@ -1,5 +1,5 @@
 #!/bin/bash
-# CI Simulation - Webhook Update
+# Webhook Update Script
 # Usage: ./update-webhook.sh [production|preview]
 
 if [ -z "$1" ]; then
@@ -7,15 +7,7 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
-# Load environment configuration
-if [ ! -f ".env" ]; then
-  echo "❌ Error: .env file not found" >&2
-  exit 1
-fi
-source .env
-
 ENVIRONMENT=$1
-
 echo "🔗 Updating Telegram webhook for $ENVIRONMENT environment..."
 
 # Set environment-specific variables
@@ -40,19 +32,13 @@ fi
 
 # Construct deployment URL
 DEPLOYMENT_URL="https://$PROJECT_NAME.deno.dev"
-
 echo "🌐 Using deployment URL: $DEPLOYMENT_URL"
 
-# Run webhook update script with all required env vars and permissions
+# Run webhook update script with all required env vars
 BOT_TOKEN=$BOT_TOKEN \
 WEBHOOK_SECRET=$WEBHOOK_SECRET \
 DEPLOYMENT_URL=$DEPLOYMENT_URL \
-deno run \
-  --allow-net \
-  --allow-env \
-  --allow-read \
-  --allow-write \
-  ../scripts/update-webhook.ts
+deno run --allow-net --allow-env ../scripts/update-webhook.ts
 
 UPDATE_STATUS=$?
 

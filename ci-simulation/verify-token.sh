@@ -1,27 +1,28 @@
 #!/bin/bash
-# CI Simulation - Token Verification
+# Token Verification for CI
 # Usage: ./verify-token.sh [production|preview]
 
 ENVIRONMENT=$1
 if [ -z "$ENVIRONMENT" ]; then
-  echo "Usage: $0 [production|preview]" >&2
+  echo "❌ Usage: $0 [production|preview]" >&2
   exit 1
 fi
 
 echo "🔑 Verifying $ENVIRONMENT environment access..."
 
-# Verify token is set
+# Verify required variables are set
 if [ -z "$DENO_DEPLOY_TOKEN" ]; then
-  echo "❌ Error: DENO_DEPLOY_TOKEN is not set" >&2
+  echo "❌ Error: DENO_DEPLOY_TOKEN is required" >&2
   exit 1
 fi
 
-# Set project name based on environment
-if [ "$ENVIRONMENT" = "production" ]; then
-  PROJECT_NAME="$DENO_PROJECT_NAME"
-else
-  PROJECT_NAME="$DENO_PREVIEW_PROJECT_NAME"
+if [ -z "$DENO_PROJECT_NAME" ] || [ -z "$DENO_PREVIEW_PROJECT_NAME" ]; then
+  echo "❌ Error: Project names must be set" >&2
+  exit 1
 fi
+
+# Set target project
+PROJECT_NAME="$([ "$ENVIRONMENT" = "production" ] && echo "$DENO_PROJECT_NAME" || echo "$DENO_PREVIEW_PROJECT_NAME")"
 
 # Test API access
 API_URL="https://dash.deno.com/api/projects/$PROJECT_NAME"

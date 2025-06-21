@@ -17,7 +17,8 @@ jobs:
 
       - name: Set environment
         run: |
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+          # Main branch = production, all others = preview
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "ENVIRONMENT=production" >> $GITHUB_ENV
             echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> $GITHUB_ENV
             echo "WEBHOOK_SECRET=${{ secrets.WEBHOOK_SECRET_PRODUCTION }}" >> $GITHUB_ENV
@@ -26,9 +27,20 @@ jobs:
             echo "BOT_TOKEN=${{ secrets.PREVIEW_BOT_TOKEN }}" >> $GITHUB_ENV
             echo "WEBHOOK_SECRET=${{ secrets.WEBHOOK_SECRET_PREVIEW }}" >> $GITHUB_ENV
           fi
+          
+          # Common variables
           echo "DENO_DEPLOY_TOKEN=${{ secrets.DENO_DEPLOY_TOKEN }}" >> $GITHUB_ENV
           echo "DENO_PROJECT_NAME=telegram-interface" >> $GITHUB_ENV
           echo "DENO_PREVIEW_PROJECT_NAME=telegram-project-preview" >> $GITHUB_ENV
+          
+          # Verify all required variables are set
+          REQUIRED_VARS=(ENVIRONMENT BOT_TOKEN WEBHOOK_SECRET DENO_DEPLOY_TOKEN)
+          for var in "${REQUIRED_VARS[@]}"; do
+            if [ -z "${!var}" ]; then
+              echo "❌ Error: Required variable $var is not set" >&2
+              exit 1
+            fi
+          done
 
       - name: Verify Deno Deploy token
         run: |

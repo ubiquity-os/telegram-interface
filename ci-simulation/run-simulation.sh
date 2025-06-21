@@ -1,10 +1,10 @@
 #!/bin/bash
-# CI Simulation Orchestrator - GitHub Actions Simulation
+# CI Simulation Orchestrator
 # Usage: ./run-simulation.sh [branch-name]
 
 BRANCH=$1
 if [ -z "$BRANCH" ]; then
-  echo "Usage: $0 [branch-name]" >&2
+  echo "❌ Usage: $0 [branch-name]" >&2
   exit 1
 fi
 
@@ -22,25 +22,20 @@ fi
 echo "🌿 Simulating push to branch: $BRANCH"
 echo "🏷️  Setting environment: $ENVIRONMENT"
 
-# Load CI environment configuration
-if [ ! -f ".env" ]; then
-  echo "Error: .env file not found. Create one based on .env.example" >&2
-  exit 1
-fi
-source .env
-
 # Verify all required variables are set
 REQUIRED_VARS=(
   DENO_DEPLOY_TOKEN
+  DENO_PROJECT_NAME
+  DENO_PREVIEW_PROJECT_NAME
   BOT_TOKEN
-  PREVIEW_BOT_TOKEN  
+  PREVIEW_BOT_TOKEN
   WEBHOOK_SECRET_PRODUCTION
   WEBHOOK_SECRET_PREVIEW
 )
 
 for var in "${REQUIRED_VARS[@]}"; do
   if [ -z "${!var}" ]; then
-    echo "Error: Required variable $var is not set in .env" >&2
+    echo "❌ Error: Required variable $var is not set" >&2
     exit 1
   fi
 done
