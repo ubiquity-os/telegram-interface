@@ -40,10 +40,16 @@ create_project() {
     
   if [ "$response" -eq 404 ]; then
     echo "🆕 Creating project: $project_name"
-    curl -X POST "https://dash.deno.com/api/projects" \
+    create_response=$(curl -s -w "%{http_code}" -o /dev/null \
+      -X POST "https://dash.deno.com/api/projects" \
       -H "Authorization: Bearer $DENO_DEPLOY_TOKEN" \
       -H "Content-Type: application/json" \
-      -d "{\"name\":\"$project_name\"}"
+      -d "{\"name\":\"$project_name\"}")
+    
+    if [ "$create_response" -ne 201 ]; then
+      echo "❌ Failed to create project $project_name (HTTP $create_response)"
+      exit 1
+    fi
   fi
 }
 
@@ -54,10 +60,18 @@ set_secret() {
   local secret_value=$3
   
   echo "🔒 Setting secret: $secret_name"
-  curl -X POST "https://dash.deno.com/api/projects/$project_name/secrets" \
+  # Capture HTTP status code
+  http_status=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "https://dash.deno.com/api/projects/$project_name/secrets" \
     -H "Authorization: Bearer $DENO_DEPLOY_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"$secret_name\", \"value\":\"$secret_value\"}" > /dev/null
+    -d "{\"name\":\"$secret_name\", \"value\":\"$secret_value\"}")
+  
+  # Verify success
+  if [ "$http_status" -ne 200 ]; then
+    echo "❌ Failed to set secret $secret_name (HTTP $http_status)"
+    exit 1
+  fi
 }
 
 # Ensure project exists
