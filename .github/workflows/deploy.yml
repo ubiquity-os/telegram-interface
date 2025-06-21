@@ -1,57 +1,46 @@
-name: Unified Bot Deployment
-
-on:
-  push:
-    branches: ['**']  # Trigger on all branches
-  workflow_dispatch:  # Allow manual triggering
-
-permissions:
-  id-token: write  # Required for OIDC token authentication
-  contents: read   # Required for actions/checkout
+name: Deploy
+on: [push]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        environment: [production, preview]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Deno
+      - uses: actions/checkout@v4
+      
+      - name: Set up Deno
         uses: denoland/setup-deno@v1
         with:
-          deno-version: v1.43.0
+          deno-version: "1.43.x"
 
-      - name: Verify Token Access (Personal)
+      - name: Install deployctl
+        run: deno install -A -r https://deno.land/x/deploy/deployctl.ts
+
+      - name: Set environment
         run: |
-          echo "Verifying personal token access to project..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.DENO_DEPLOY_TOKEN }}" \
-          https://dash.deno.com/api/projects/telegram-interface)
-          
-          if [ "$response" -eq 200 ]; then
-            echo "Token verification successful"
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "ENVIRONMENT=production" >> $GITHUB_ENV
+            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> $GITHUB_ENV
+            echo "WEBHOOK_SECRET=${{ secrets.WEBHOOK_SECRET_PRODUCTION }}" >> $GITHUB_ENV
           else
-            echo "ERROR: Token verification failed with status $response"
-            exit 1
+            echo "ENVIRONMENT=preview" >> $GITHUB_ENV
+            echo "BOT_TOKEN=${{ secrets.PREVIEW_BOT_TOKEN }}" >> $GITHUB_ENV
+            echo "WEBHOOK_SECRET=${{ secrets.WEBHOOK_SECRET_PREVIEW }}" >> $GITHUB_ENV
           fi
+          echo "DENO_DEPLOY_TOKEN=${{ secrets.DENO_DEPLOY_TOKEN }}" >> $GITHUB_ENV
+          echo "DENO_PROJECT_NAME=telegram-interface" >> $GITHUB_ENV
+          echo "DENO_PREVIEW_PROJECT_NAME=telegram-project-preview" >> $GITHUB_ENV
 
-      - name: Deploy
-        uses: denoland/deployctl@1.13.1
-        env:
-          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
-        with:
-          project: telegram-interface
-          entrypoint: src/main.ts
-          root: "."
-          include: "**"
-          exclude: "**.spec.ts"
+      - name: Verify Deno Deploy token
+        run: |
+          cd ci-simulation
+          ./verify-token.sh $ENVIRONMENT
 
-      - name: Update webhook
-        run: deno run --allow-net --allow-env scripts/update-webhook.ts
-        env:
-          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
-          BOT_TOKEN: ${{ matrix.environment == 'production' && secrets.PRODUCTION_BOT_TOKEN || secrets.PREVIEW_BOT_TOKEN }}
-          WEBHOOK_SECRET: ${{ matrix.environment == 'production' && secrets.WEBHOOK_SECRET_PRODUCTION || secrets.WEBHOOK_SECRET_PREVIEW }}
-          IS_PRODUCTION: ${{ matrix.environment == 'production' }}
+      - name: Deploy to Deno
+        run: |
+          cd ci-simulation
+          ./deploy.sh $ENVIRONMENT
+
+      - name: Update Telegram webhook
+        run: |
+          cd ci-simulation
+          ./update-webhook.sh $ENVIRONMENT

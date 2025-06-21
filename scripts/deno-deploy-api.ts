@@ -1,3 +1,10 @@
+declare namespace Deno {
+  export const env: {
+    get(key: string): string | undefined;
+  };
+  export const mainModule: string;
+}
+
 export interface DenoDeployment {
   id: string;
   url: string;
@@ -39,8 +46,8 @@ export class DenoDeployApi {
   private baseUrl = "https://api.deno.com/v1";
 
   constructor(token?: string, projectName?: string) {
-    this.token = token || process.env.DENO_DEPLOY_TOKEN || "";
-    this.projectName = projectName || process.env.DENO_PROJECT_NAME || "telegram-interface";
+    this.token = token || Deno.env.get("DENO_DEPLOY_TOKEN") || "";
+    this.projectName = projectName || Deno.env.get("DENO_PROJECT_NAME") || "telegram-interface";
     
     if (!this.token) {
       throw new Error("DENO_DEPLOY_TOKEN environment variable is required");
@@ -109,8 +116,9 @@ export class DenoDeployApi {
           deployment.url
       );
 
+      // If no deployments found but we have a project name, use the standard URL
       if (validDeployments.length === 0) {
-        throw new Error("No successful deployments found");
+        return `https://${this.projectName}.deno.dev`;
       }
 
       // Find production deployment if requested
@@ -165,6 +173,6 @@ async function debugProject() {
   }
 }
 
-if (import.meta.main) {
+if (import.meta.url === Deno.mainModule) {
   debugProject();
 }

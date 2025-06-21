@@ -14,5 +14,16 @@
     "grammy": "https://deno.land/x/grammy@v1.21.1/mod.ts",
     "grammy/types": "https://deno.land/x/grammy@v1.21.1/types.ts",
     "std/": "https://deno.land/std@0.213.0/"
+  },
+  "deploy": {
+    "project": "3cd948fc-3688-478e-8394-70a03eb59431",
+    "exclude": [
+      "**.spec.ts",
+      "**/node_modules"
+    ],
+    "include": [
+      "**"
+    ],
+    "entrypoint": "src/main.ts"
   }
 }
