@@ -15,44 +15,47 @@ jobs:
       - name: Install deployctl
         run: deno install -A --no-check -r https://deno.land/x/deploy@1.12.0/deployctl.ts
 
-      - name: Set environment
-        run: |
-          # Main branch = production, all others = preview
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "ENVIRONMENT=production" >> $GITHUB_ENV
-            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> $GITHUB_ENV
-            echo "WEBHOOK_SECRET=${{ secrets.WEBHOOK_SECRET_PRODUCTION }}" >> $GITHUB_ENV
-          else
-            echo "ENVIRONMENT=preview" >> $GITHUB_ENV
-            echo "BOT_TOKEN=${{ secrets.PREVIEW_BOT_TOKEN }}" >> $GITHUB_ENV
-            echo "WEBHOOK_SECRET=${{ secrets.WEBHOOK_SECRET_PREVIEW }}" >> $GITHUB_ENV
-          fi
-          
-          # Common variables
-          echo "DENO_DEPLOY_TOKEN=${{ secrets.DENO_DEPLOY_TOKEN }}" >> $GITHUB_ENV
-          echo "DENO_PROJECT_NAME=telegram-interface" >> $GITHUB_ENV
-          echo "DENO_PREVIEW_PROJECT_NAME=telegram-project-preview" >> $GITHUB_ENV
-          
-          # Verify all required variables are set
-          REQUIRED_VARS=(ENVIRONMENT BOT_TOKEN WEBHOOK_SECRET DENO_DEPLOY_TOKEN)
-          for var in "${REQUIRED_VARS[@]}"; do
-            if [ -z "${!var}" ]; then
-              echo "❌ Error: Required variable $var is not set" >&2
-              exit 1
-            fi
-          done
-
       - name: Verify Deno Deploy token
         run: |
           cd ci-simulation
-          ./verify-token.sh $ENVIRONMENT
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ./verify-token.sh production \
+              "${{ secrets.DENO_DEPLOY_TOKEN }}" \
+              "telegram-interface" \
+              "telegram-project-preview"
+          else
+            ./verify-token.sh preview \
+              "${{ secrets.DENO_DEPLOY_TOKEN }}" \
+              "telegram-interface" \
+              "telegram-project-preview"
+          fi
 
       - name: Deploy to Deno
         run: |
           cd ci-simulation
-          ./deploy.sh $ENVIRONMENT
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ./deploy.sh production \
+              "${{ secrets.DENO_DEPLOY_TOKEN }}" \
+              "telegram-interface" \
+              "telegram-project-preview"
+          else
+            ./deploy.sh preview \
+              "${{ secrets.DENO_DEPLOY_TOKEN }}" \
+              "telegram-interface" \
+              "telegram-project-preview"
+          fi
 
       - name: Update Telegram webhook
         run: |
           cd ci-simulation
-          ./update-webhook.sh $ENVIRONMENT
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ./update-webhook.sh production \
+              "${{ secrets.BOT_TOKEN }}" \
+              "${{ secrets.WEBHOOK_SECRET_PRODUCTION }}" \
+              "telegram-interface"
+          else
+            ./update-webhook.sh preview \
+              "${{ secrets.PREVIEW_BOT_TOKEN }}" \
+              "${{ secrets.WEBHOOK_SECRET_PREVIEW }}" \
+              "telegram-project-preview"
+          fi

@@ -1,25 +1,19 @@
 #!/bin/bash
-# Token Verification for CI
-# Usage: ./verify-token.sh [production|preview]
+# Token Verification Script
+# Usage: ./verify-token.sh [environment] [deno_deploy_token] [production_project] [preview_project]
+
+# Validate arguments
+if [ $# -lt 4 ]; then
+  echo "❌ Usage: $0 [production|preview] [deno_deploy_token] [production_project] [preview_project]" >&2
+  exit 1
+fi
 
 ENVIRONMENT=$1
-if [ -z "$ENVIRONMENT" ]; then
-  echo "❌ Usage: $0 [production|preview]" >&2
-  exit 1
-fi
+DENO_DEPLOY_TOKEN=$2
+DENO_PROJECT_NAME=$3
+DENO_PREVIEW_PROJECT_NAME=$4
 
 echo "🔑 Verifying $ENVIRONMENT environment access..."
-
-# Verify required variables are set
-if [ -z "$DENO_DEPLOY_TOKEN" ]; then
-  echo "❌ Error: DENO_DEPLOY_TOKEN is required" >&2
-  exit 1
-fi
-
-if [ -z "$DENO_PROJECT_NAME" ] || [ -z "$DENO_PREVIEW_PROJECT_NAME" ]; then
-  echo "❌ Error: Project names must be set" >&2
-  exit 1
-fi
 
 # Set target project
 PROJECT_NAME="$([ "$ENVIRONMENT" = "production" ] && echo "$DENO_PROJECT_NAME" || echo "$DENO_PREVIEW_PROJECT_NAME")"

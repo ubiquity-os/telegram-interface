@@ -1,29 +1,23 @@
 #!/bin/bash
-# CI Deployment Script
-# Usage: ./deploy.sh [production|preview]
+# Deployment Script
+# Usage: ./deploy.sh [environment] [deno_deploy_token] [production_project] [preview_project]
 
-ENVIRONMENT=$1
-if [ -z "$ENVIRONMENT" ]; then
-  echo "❌ Usage: $0 [production|preview]" >&2
+# Validate arguments
+if [ $# -lt 4 ]; then
+  echo "❌ Usage: $0 [production|preview] [deno_deploy_token] [production_project] [preview_project]" >&2
   exit 1
 fi
+
+ENVIRONMENT=$1
+DENO_DEPLOY_TOKEN=$2
+DENO_PROJECT_NAME=$3
+DENO_PREVIEW_PROJECT_NAME=$4
 
 echo "🚀 Starting $ENVIRONMENT deployment..."
 
 # Verify deployctl is available
 if ! command -v deployctl &> /dev/null; then
   echo "❌ Error: deployctl not found. Run setup-deno.sh first." >&2
-  exit 1
-fi
-
-# Verify required variables
-if [ -z "$DENO_DEPLOY_TOKEN" ]; then
-  echo "❌ Error: DENO_DEPLOY_TOKEN is required" >&2
-  exit 1
-fi
-
-if [ -z "$DENO_PROJECT_NAME" ] || [ -z "$DENO_PREVIEW_PROJECT_NAME" ]; then
-  echo "❌ Error: Project names must be set" >&2
   exit 1
 fi
 

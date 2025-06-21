@@ -1,34 +1,19 @@
 #!/bin/bash
 # Webhook Update Script
-# Usage: ./update-webhook.sh [production|preview]
+# Usage: ./update-webhook.sh [environment] [bot_token] [webhook_secret] [project_name]
 
-if [ -z "$1" ]; then
-  echo "❌ Error: Environment argument missing" >&2
+# Validate arguments
+if [ $# -lt 4 ]; then
+  echo "❌ Usage: $0 [production|preview] [bot_token] [webhook_secret] [project_name]" >&2
   exit 1
 fi
 
 ENVIRONMENT=$1
+BOT_TOKEN=$2
+WEBHOOK_SECRET=$3
+PROJECT_NAME=$4
+
 echo "🔗 Updating Telegram webhook for $ENVIRONMENT environment..."
-
-# Set environment-specific variables
-if [ "$ENVIRONMENT" = "production" ]; then
-  BOT_TOKEN="$BOT_TOKEN"
-  WEBHOOK_SECRET="$WEBHOOK_SECRET_PRODUCTION"
-  PROJECT_NAME="$DENO_PROJECT_NAME"
-elif [ "$ENVIRONMENT" = "preview" ]; then
-  BOT_TOKEN="$PREVIEW_BOT_TOKEN"
-  WEBHOOK_SECRET="$WEBHOOK_SECRET_PREVIEW"
-  PROJECT_NAME="$DENO_PREVIEW_PROJECT_NAME"
-else
-  echo "❌ Error: Invalid environment '$ENVIRONMENT'" >&2
-  exit 1
-fi
-
-# Verify required variables
-if [ -z "$BOT_TOKEN" ] || [ -z "$WEBHOOK_SECRET" ] || [ -z "$PROJECT_NAME" ]; then
-  echo "❌ Error: Missing required variables for $ENVIRONMENT" >&2
-  exit 1
-fi
 
 # Construct deployment URL
 DEPLOYMENT_URL="https://$PROJECT_NAME.deno.dev"
