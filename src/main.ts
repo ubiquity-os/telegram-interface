@@ -30,6 +30,53 @@ Deno.serve({
     });
   }
 
+  // Test message endpoint for E2E testing
+  if (url.pathname === "/test/message" && req.method === "POST") {
+    try {
+      const body = await req.json();
+
+      // Validate request body
+      if (!body.message || typeof body.message !== "string") {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Missing or invalid 'message' field"
+        }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (!body.chatId || typeof body.chatId !== "number") {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Missing or invalid 'chatId' field"
+        }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Import and use the test message handler
+      const { handleTestMessage } = await import("./services/test-message-handler.ts");
+      const result = await handleTestMessage(body);
+
+      return new Response(JSON.stringify(result, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+
+    } catch (error) {
+      console.error("Test message endpoint error:", error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Failed to process test message",
+        details: error.message
+      }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
   // Conversations endpoint to view KV data
   if (url.pathname === "/conversations" && req.method === "GET") {
     try {
