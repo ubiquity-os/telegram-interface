@@ -1,4 +1,4 @@
-import { mcpHub } from "./mcp-hub.ts";
+import { MCPToolManager } from "../components/mcp-tool-manager/index.ts";
 
 /**
  * Generates the system prompt for the LLM with MCP tool definitions
@@ -19,10 +19,17 @@ You have access to tools that extend your capabilities. Tools are invoked using 
 
 ### Tool Format
 
+For core tools:
 <tool_name>
 <parameter1_name>value1</parameter1_name>
 <parameter2_name>value2</parameter2_name>
 </tool_name>
+
+For external MCP tools (use direct format):
+<serverId_toolName>
+<parameter1_name>value1</parameter1_name>
+<parameter2_name>value2</parameter2_name>
+</serverId_toolName>
 
 ### Core Tools
 
@@ -52,9 +59,11 @@ Your final result description here
 
 `;
 
-  // Add MCP tool definitions
-  const mcpToolDefinitions = mcpHub.generateToolDefinitions();
-  
+  // Add MCP tool definitions using the new MTM component
+  const mtm = new MCPToolManager();
+  await mtm.initialize();
+  const mcpToolDefinitions = mtm.generateSystemPromptTools();
+
   const fullPrompt = basePrompt + mcpToolDefinitions + `
 
 ## Tool Use Guidelines
@@ -62,7 +71,7 @@ Your final result description here
 1. Use one tool per message
 2. Wait for the tool result before proceeding
 3. If a tool fails, explain the error to the user and suggest alternatives
-4. For MCP tools, ensure the arguments are valid JSON
+4. For external MCP tools, use the direct XML format (serverId_toolName)
 5. Always validate that required parameters are provided
 
 ## Response Guidelines

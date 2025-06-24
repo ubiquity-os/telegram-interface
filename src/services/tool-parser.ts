@@ -121,23 +121,25 @@ export function parseAssistantMessage(message: string): AssistantMessageContent[
 
 /**
  * Validates if a string is a known tool name
- * This will be populated dynamically from MCP servers
+ * This supports both core tools and direct MCP tool format (serverId_toolName)
  */
 function isValidToolName(name: string): boolean {
   // Core tool names that are always valid
   const coreTools = [
-    "use_mcp_tool",
-    "access_mcp_resource",
     "ask_followup_question",
     "attempt_completion",
   ];
-  
+
   if (coreTools.includes(name)) {
     return true;
   }
-  
-  // For now, we'll accept any tool name that matches MCP naming conventions
-  // This will be enhanced when we integrate with the MCP hub
+
+  // Check for direct MCP tool format: serverId_toolName
+  if (/^[a-zA-Z][a-zA-Z0-9]*_[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+    return true;
+  }
+
+  // Accept any tool name that matches general naming conventions
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
 }
 
@@ -156,15 +158,15 @@ export function formatToolResult(toolName: string, result: any, error?: string, 
   let resultXml = `<tool_result>
 <tool_name>${toolName}</tool_name>
 <status>success</status>`;
-  
+
   if (requiresUserResponse) {
     resultXml += `
 <requires_user_response>true</requires_user_response>`;
   }
-  
+
   resultXml += `
 <output>${typeof result === 'string' ? result : JSON.stringify(result, null, 2)}</output>
 </tool_result>`;
-  
+
   return resultXml;
 }

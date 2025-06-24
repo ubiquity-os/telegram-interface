@@ -1,5 +1,5 @@
 import { ToolCall } from "./tool-parser.ts";
-import { mcpHub } from "./mcp-hub.ts";
+import { MCPToolManager } from "../components/mcp-tool-manager/index.ts";
 import { formatToolResult } from "./tool-parser.ts";
 
 export interface ToolExecutionResult {
@@ -9,24 +9,38 @@ export interface ToolExecutionResult {
   requiresUserResponse?: boolean;
 }
 
+// Global MTM instance
+let mtmInstance: MCPToolManager | null = null;
+
+async function getMTMInstance(): Promise<MCPToolManager> {
+  if (!mtmInstance) {
+    mtmInstance = new MCPToolManager();
+    await mtmInstance.initialize();
+  }
+  return mtmInstance;
+}
+
 /**
  * Executes a parsed tool call and returns the result
  */
 export async function executeTool(tool: ToolCall): Promise<ToolExecutionResult> {
   try {
+    // Check if it's a direct MCP tool (serverId_toolName format)
+    if (tool.name.includes('_')) {
+      const parts = tool.name.split('_', 2);
+      if (parts.length === 2) {
+        return await executeDirectMcpTool(parts[0], parts[1], tool.params);
+      }
+    }
+
+    // Handle core tools
     switch (tool.name) {
-      case "use_mcp_tool":
-        return await executeUseMcpTool(tool.params);
-      
       case "ask_followup_question":
         return executeAskFollowupQuestion(tool.params);
-      
+
       case "attempt_completion":
         return executeAttemptCompletion(tool.params);
-      
-      case "access_mcp_resource":
-        return executeAccessMcpResource(tool.params);
-      
+
       default:
         return {
           success: false,
@@ -42,35 +56,32 @@ export async function executeTool(tool: ToolCall): Promise<ToolExecutionResult> 
 }
 
 /**
- * Execute MCP tool call
+ * Execute direct MCP tool call using new MTM component
  */
-async function executeUseMcpTool(params: Record<string, string>): Promise<ToolExecutionResult> {
-  const serverName = params.server_name;
-  const toolName = params.tool_name;
-  const argumentsStr = params.arguments;
-
-  if (!serverName || !toolName) {
+async function executeDirectMcpTool(serverId: string, toolName: string, params: Record<string, string>): Promise<ToolExecutionResult> {
+  if (!serverId || !toolName) {
     return {
       success: false,
-      error: "Missing required parameters: server_name and tool_name",
-    };
-  }
-
-  let args: any;
-  try {
-    args = argumentsStr ? JSON.parse(argumentsStr) : {};
-  } catch (error) {
-    return {
-      success: false,
-      error: "Invalid JSON in arguments parameter",
+      error: "Missing required parameters: serverId and toolName",
     };
   }
 
   try {
-    const result = await mcpHub.executeTool(serverName, toolName, args);
+    const mtm = await getMTMInstance();
+
+    // Create ToolCall object for MTM
+    const toolCall = {
+      toolId: `${serverId}_${toolName}_${Date.now()}`,
+      serverId,
+      toolName,
+      arguments: params
+    };
+
+    const result = await mtm.executeTool(toolCall);
     return {
-      success: true,
-      result,
+      success: result.success,
+      result: result.success ? result.output : undefined,
+      error: result.success ? undefined : result.error,
     };
   } catch (error) {
     return {
@@ -85,7 +96,7 @@ async function executeUseMcpTool(params: Record<string, string>): Promise<ToolEx
  */
 function executeAskFollowupQuestion(params: Record<string, string>): ToolExecutionResult {
   const question = params.question;
-  
+
   if (!question) {
     return {
       success: false,
@@ -124,7 +135,7 @@ function executeAskFollowupQuestion(params: Record<string, string>): ToolExecuti
  */
 function executeAttemptCompletion(params: Record<string, string>): ToolExecutionResult {
   const result = params.result;
-  
+
   if (!result) {
     return {
       success: false,
@@ -141,26 +152,6 @@ function executeAttemptCompletion(params: Record<string, string>): ToolExecution
   };
 }
 
-/**
- * Execute access_mcp_resource tool
- */
-function executeAccessMcpResource(params: Record<string, string>): ToolExecutionResult {
-  const serverName = params.server_name;
-  const uri = params.uri;
-
-  if (!serverName || !uri) {
-    return {
-      success: false,
-      error: "Missing required parameters: server_name and uri",
-    };
-  }
-
-  // This is a placeholder - real implementation would access MCP resources
-  return {
-    success: false,
-    error: "MCP resource access not yet implemented",
-  };
-}
 
 /**
  * Formats a tool execution result for the LLM
@@ -169,11 +160,11 @@ export function formatExecutionResult(toolName: string, result: ToolExecutionRes
   if (!result.success) {
     return formatToolResult(toolName, null, result.error);
   }
-  
+
   // Include requiresUserResponse flag if present
   if (result.requiresUserResponse) {
     return formatToolResult(toolName, result.result, undefined, result.requiresUserResponse);
   }
-  
+
   return formatToolResult(toolName, result.result);
 }
