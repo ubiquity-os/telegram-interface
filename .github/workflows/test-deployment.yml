@@ -1,0 +1,110 @@
+name: Test Deployment System
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of test to run'
+        required: true
+        default: 'webhook-check'
+        type: choice
+        options:
+        - webhook-check
+        - config-test
+        - api-connectivity
+
+jobs:
+  test:
+    name: Test Deployment Infrastructure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Test Configuration System
+        if: inputs.test_type == 'config-test' || inputs.test_type == 'webhook-check'
+        run: |
+          echo "🧪 Testing configuration system..."
+          
+          # Test production config
+          export BOT_TYPE=production
+          export BOT_TOKEN="${{ secrets.BOT_TOKEN }}"
+          export WEBHOOK_SECRET_PRODUCTION="${{ secrets.WEBHOOK_SECRET_PRODUCTION }}"
+          export OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}"
+          
+          deno run --allow-env test-config.ts
+          
+          # Test preview config
+          export BOT_TYPE=preview
+          export PREVIEW_BOT_TOKEN="${{ secrets.PREVIEW_BOT_TOKEN }}"
+          export WEBHOOK_SECRET_PREVIEW="${{ secrets.WEBHOOK_SECRET_PREVIEW }}"
+          
+          deno run --allow-env test-config.ts
+
+      - name: Test Webhook Status
+        if: inputs.test_type == 'webhook-check'
+        run: |
+          echo "🔍 Checking current webhook status..."
+          
+          echo "Production bot webhook status:"
+          deno run --allow-net --allow-env scripts/check-webhook.ts --bot-type production
+          
+          echo -e "\nPreview bot webhook status:"
+          deno run --allow-net --allow-env scripts/check-webhook.ts --bot-type preview
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PREVIEW_BOT_TOKEN: ${{ secrets.PREVIEW_BOT_TOKEN }}
+
+      - name: Test API Connectivity
+        if: inputs.test_type == 'api-connectivity'
+        run: |
+          echo "🌐 Testing API connectivity..."
+          
+          # Test Deno Deploy API
+          deno run --allow-net --allow-env -A - <<'EOF'
+          import { DenoDeployApi } from './scripts/deno-deploy-api.ts';
+          
+          try {
+            const api = new DenoDeployApi();
+            const project = await api.getProject();
+            console.log('✅ Deno Deploy API connection successful');
+            console.log(`Project: ${project.name}`);
+          } catch (error) {
+            console.error('❌ Deno Deploy API connection failed:', error.message);
+            Deno.exit(1);
+          }
+          EOF
+          
+          # Test Telegram Bot API
+          echo "Testing Telegram Bot API connectivity..."
+          deno run --allow-net --allow-env -A - <<'EOF'
+          const response = await fetch(`https://api.telegram.org/bot${Deno.env.get('BOT_TOKEN')}/getMe`);
+          const result = await response.json();
+          
+          if (result.ok) {
+            console.log('✅ Telegram Bot API connection successful');
+            console.log(`Bot: ${result.result.first_name} (@${result.result.username})`);
+          } else {
+            console.error('❌ Telegram Bot API connection failed:', result);
+            Deno.exit(1);
+          }
+          EOF
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
+
+      - name: Test Summary
+        run: |
+          echo "✅ **Test Results Summary**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Type:** ${{ inputs.test_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All deployment infrastructure tests passed! 🎉" >> $GITHUB_STEP_SUMMARY

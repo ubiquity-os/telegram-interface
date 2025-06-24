@@ -1,0 +1,61 @@
+name: Deploy
+on: [push]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: "1.43.x"
+
+      - name: Install deployctl
+        run: deno install -A --no-check -r https://deno.land/x/deploy@1.12.0/deployctl.ts
+
+      - name: Verify Deno Deploy token
+        run: |
+          cd ci-simulation
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ./verify-token.sh production \
+              "${{ secrets.DENO_DEPLOY_TOKEN }}" \
+              "telegram-interface" \
+              "telegram-project-preview"
+          else
+            ./verify-token.sh preview \
+              "${{ secrets.DENO_DEPLOY_TOKEN }}" \
+              "telegram-interface" \
+              "telegram-project-preview"
+          fi
+
+      - name: Deploy to Deno
+        run: |
+          cd ci-simulation
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ./deploy.sh production \
+              "${{ secrets.DENO_DEPLOY_TOKEN }}" \
+              "telegram-interface" \
+              "telegram-project-preview"
+          else
+            ./deploy.sh preview \
+              "${{ secrets.DENO_DEPLOY_TOKEN }}" \
+              "telegram-interface" \
+              "telegram-project-preview"
+          fi
+
+      - name: Update Telegram webhook
+        run: |
+          cd ci-simulation
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ./update-webhook.sh production \
+              "${{ secrets.BOT_TOKEN }}" \
+              "${{ secrets.WEBHOOK_SECRET_PRODUCTION }}" \
+              "telegram-interface"
+          else
+            ./update-webhook.sh preview \
+              "${{ secrets.PREVIEW_BOT_TOKEN }}" \
+              "${{ secrets.WEBHOOK_SECRET_PREVIEW }}" \
+              "telegram-project-preview"
+          fi

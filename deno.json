@@ -1,6 +1,12 @@
 {
+  "compilerOptions": {
+    "types": [
+      "https://deno.land/x/deno_types/v1.42.0/lib.deno.ns.d.ts",
+      "bun-types"
+    ]
+  },
   "tasks": {
-    "dev": "deno run --watch --allow-net --allow-env --allow-read src/main.ts",
+    "dev": "deno run --watch --allow-net --allow-env --allow-read src/main.ts --allow-import",
     "test": "deno test --allow-net --allow-env",
     "fmt": "deno fmt",
     "lint": "deno lint"
@@ -9,5 +15,16 @@
     "grammy": "https://deno.land/x/grammy@v1.21.1/mod.ts",
     "grammy/types": "https://deno.land/x/grammy@v1.21.1/types.ts",
     "std/": "https://deno.land/std@0.213.0/"
+  },
+  "deploy": {
+    "project": "3cd948fc-3688-478e-8394-70a03eb59431",
+    "exclude": [
+      "**.spec.ts",
+      "**/node_modules"
+    ],
+    "include": [
+      "**"
+    ],
+    "entrypoint": "src/main.ts"
   }
 }

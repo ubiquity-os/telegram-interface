@@ -1,0 +1,18 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "devDependencies": {
+        "@types/node": "^24.0.3",
+        "deno-types": "^1.25.0",
+      },
+    },
+  },
+  "packages": {
+    "@types/node": ["@types/node@24.0.3", "", { "dependencies": { "undici-types": "~7.8.0" } }, "sha512-R4I/kzCYAdRLzfiCabn9hxWfbuHS573x+r0dJMkkzThEa7pbrcDWK+9zu3e7aBOouf+rQAciqPFMnxwr0aWgKg=="],
+
+    "deno-types": ["deno-types@1.25.0", "", {}, "sha512-O6nCW/DeVLVpMjr+jWKN+9ejnGm/qR9Mvb1jNO5NQzpPHgW7BkxKDSX7ssADy9yc31iy5pzd+cCCYEKKY/zA9g=="],
+
+    "undici-types": ["undici-types@7.8.0", "", {}, "sha512-9UJ2xGDvQ43tYyVMpuHlsgApydB8ZKfVYTsLDhXkFL/6gfkp+U8xTGdh8pMJv1SpZna0zxG1DwsKZsreLbXBxw=="],
+  }
+}

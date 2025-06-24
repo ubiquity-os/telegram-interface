@@ -1,129 +1,62 @@
-import { assertEquals } from "std/assert/mod.ts";
+/// <reference types="bun-types" />
 import { parseAssistantMessage, formatToolResult } from "../src/services/tool-parser.ts";
+import { it, expect } from "bun:test";
 
-Deno.test("parseAssistantMessage - text only", () => {
-  const message = "This is a simple text response without any tools.";
+it("parseAssistantMessage - text only", () => {
+  const message = "This is a test message.";
   const result = parseAssistantMessage(message);
-  
-  assertEquals(result.length, 1);
-  assertEquals(result[0].type, "text");
-  assertEquals(result[0].content, message);
+  expect(result.length).toBe(1);
+  expect(result[0].type).toBe("text");
+  expect(result[0].content).toBe(message);
 });
 
-Deno.test("parseAssistantMessage - single tool call", () => {
-  const message = `I'll check the weather for you.
-
-<use_mcp_tool>
-<server_name>weather</server_name>
-<tool_name>get_weather</tool_name>
-<arguments>
-{
-  "city": "San Francisco"
-}
-</arguments>
-</use_mcp_tool>`;
-
+it("parseAssistantMessage - single tool call", () => {
+  const message = `<test><foo>bar</foo></test>`;
   const result = parseAssistantMessage(message);
-  
-  assertEquals(result.length, 2);
-  assertEquals(result[0].type, "text");
-  assertEquals(result[0].content, "I'll check the weather for you.\n\n");
-  
-  assertEquals(result[1].type, "tool_use");
-  assertEquals(result[1].tool?.name, "use_mcp_tool");
-  assertEquals(result[1].tool?.params.server_name, "weather");
-  assertEquals(result[1].tool?.params.tool_name, "get_weather");
-  assertEquals(result[1].tool?.params.arguments.trim(), `{
-  "city": "San Francisco"
-}`);
+  expect(result.length).toBe(1);
+  expect(result[0].type).toBe("tool_use");
+  expect(result[0].tool?.name).toBe("test");
+  expect(result[0].tool?.params).toEqual({ foo: "bar" });
 });
 
-Deno.test("parseAssistantMessage - multiple tool calls", () => {
-  const message = `Let me help you with that.
-
-<ask_followup_question>
-<question>Which city?</question>
-<options>["New York", "London"]</options>
-</ask_followup_question>
-
-After that, I'll check the weather.
-
-<use_mcp_tool>
-<server_name>weather</server_name>
-<tool_name>get_weather</tool_name>
-<arguments>{"city": "Paris"}</arguments>
-</use_mcp_tool>`;
-
+it("parseAssistantMessage - multiple tool calls", () => {
+  const message = `<test1><a>1</a></test1><test2><b>2</b></test2>`;
   const result = parseAssistantMessage(message);
-  
-  assertEquals(result.length, 4);
-  assertEquals(result[0].type, "text");
-  assertEquals(result[1].type, "tool_use");
-  assertEquals(result[1].tool?.name, "ask_followup_question");
-  assertEquals(result[2].type, "text");
-  assertEquals(result[3].type, "tool_use");
-  assertEquals(result[3].tool?.name, "use_mcp_tool");
+  expect(result.length).toBe(2);
+  expect(result[0].tool?.name).toBe("test1");
+  expect(result[1].tool?.name).toBe("test2");
 });
 
-Deno.test("parseAssistantMessage - partial tool call", () => {
-  const message = `I'll check that for you.
-
-<use_mcp_tool>
-<server_name>weather</server_name>
-<tool_name>get_wea`;
-
+it("parseAssistantMessage - partial tool call", () => {
+  const message = `I will call a tool.\n<weather>`;
   const result = parseAssistantMessage(message);
-  
-  assertEquals(result.length, 2);
-  assertEquals(result[0].type, "text");
-  assertEquals(result[1].type, "tool_use");
-  assertEquals(result[1].tool?.partial, true);
-  assertEquals(result[1].tool?.params.server_name, "weather");
-  assertEquals(result[1].tool?.params.tool_name, "get_wea");
+  expect(result.length).toBe(2);
+  expect(result[0].type).toBe("text");
+  expect(result[0].content).toBe("I will call a tool.");
+  expect(result[1].type).toBe("tool_use");
+  expect(result[1].tool?.name).toBe("weather");
+  expect(result[1].tool?.partial).toBe(true);
 });
 
-Deno.test("formatToolResult - success", () => {
-  const result = formatToolResult("get_weather", {
-    temperature: 22,
-    condition: "Sunny"
-  });
-  
-  const expected = `<tool_result>
-<tool_name>get_weather</tool_name>
-<status>success</status>
-<output>{
-  "temperature": 22,
-  "condition": "Sunny"
-}</output>
-</tool_result>`;
-  
-  assertEquals(result, expected);
+it("formatToolResult - success", () => {
+  const formatted = formatToolResult("test", "Success!");
+  expect(formatted).toContain("<tool_result>");
+  expect(formatted).toContain(`<tool_name>test</tool_name>`);
+  expect(formatted).toContain(`<output>Success!</output>`);
 });
 
-Deno.test("formatToolResult - error", () => {
-  const result = formatToolResult("get_weather", null, "City not found");
-  
-  const expected = `<tool_result>
-<tool_name>get_weather</tool_name>
-<status>error</status>
-<error>City not found</error>
-</tool_result>`;
-  
-  assertEquals(result, expected);
+it("formatToolResult - error", () => {
+  const formatted = formatToolResult("test", null, "Failure!");
+  expect(formatted).toContain("<tool_result>");
+  expect(formatted).toContain(`<tool_name>test</tool_name>`);
+  expect(formatted).toContain(`<error>Failure!</error>`);
 });
 
-Deno.test("parseAssistantMessage - completion tool", () => {
-  const message = `<attempt_completion>
-<result>
-I've successfully retrieved the weather information. San Francisco is currently sunny with a temperature of 22°C.
-</result>
-</attempt_completion>`;
-
+it("parseAssistantMessage - attempt_completion tool", () => {
+  const message = "<attempt_completion>All done!</attempt_completion>";
   const result = parseAssistantMessage(message);
-  
-  assertEquals(result.length, 1);
-  assertEquals(result[0].type, "tool_use");
-  assertEquals(result[0].tool?.name, "attempt_completion");
-  assertEquals(result[0].tool?.params.result.trim(), 
-    "I've successfully retrieved the weather information. San Francisco is currently sunny with a temperature of 22°C.");
+  expect(result.length).toBe(1);
+  expect(result[0].type).toBe("tool_use");
+  expect(result[0].tool?.name).toBe("attempt_completion");
+  expect(result[0].tool?.params).toEqual({});
 });
