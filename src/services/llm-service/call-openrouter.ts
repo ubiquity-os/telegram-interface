@@ -1,5 +1,5 @@
-import { getConfig } from "../utils/config.ts";
-import { OpenRouterMessage, OpenRouterResponse } from "./openrouter-types.ts";
+import { getConfig } from "../../utils/config.ts";
+import { OpenRouterMessage, OpenRouterResponse } from "../openrouter-types.ts";
 
 const TIMEOUT_MS = 30000; // 30 seconds
 

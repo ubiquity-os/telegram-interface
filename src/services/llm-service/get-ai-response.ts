@@ -1,14 +1,13 @@
-import { callOpenRouter } from "./call-openrouter.ts";
-import { OpenRouterMessage } from "./openrouter-types.ts";
-import { conversationHistory } from "./conversation-history.ts";
-import { countTokens } from "../utils/token-counter.ts";
-import { parseAssistantMessage } from "./tool-parser.ts";
-import { executeTool, formatExecutionResult } from "./tool-executor.ts";
-import { generateSystemPrompt } from "./system-prompt.ts";
-import { mcpHub } from "./mcp-hub.ts";
-import { isValidResponse, generateInvalidResponseError } from "./response-validation.ts";
+import { OpenRouterMessage } from "../openrouter-types.ts";
+import { conversationHistory } from "../conversation-history.ts";
+import { countTokens } from "../../utils/token-counter.ts";
+import { parseAssistantMessage } from "../tool-parser.ts";
+import { executeTool, formatExecutionResult } from "../tool-executor.ts";
+import { generateSystemPrompt } from "../system-prompt.ts";
+import { mcpHub } from "../mcp-hub.ts";
+import { isValidResponse, generateInvalidResponseError } from "../response-validation.ts";
+import { llmService } from "./llm-service.ts";
 
-const MODEL = "deepseek/deepseek-r1-0528:free";
 const MAX_CONTEXT_TOKENS = 64000; // 64k tokens for context, leaving plenty for response
 const MAX_TOOL_ITERATIONS = 5; // Prevent infinite tool loops
 const MAX_RETRY_ATTEMPTS = 3; // Max retries for forcing proper response format
@@ -46,12 +45,12 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
   );
 
   console.log(`Built context with ${messages.length} messages for chat ${chatId}`);
-  
+
   // Store user message in conversation history
   await conversationHistory.addMessage(chatId, userMessageObj);
 
   let retryAttempts = 0;
-  
+
   // Main retry loop - applies to EVERY message
   while (retryAttempts < MAX_RETRY_ATTEMPTS) {
     let finalResponse = "";
@@ -62,42 +61,42 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
 
     // Tool calling loop
     while (toolIterations < MAX_TOOL_ITERATIONS) {
-      console.log(`Calling OpenRouter with model: ${MODEL} (iteration ${toolIterations + 1}, retry ${retryAttempts})`);
-      
-      const response = await callOpenRouter(messages, MODEL);
+      console.log(`Calling LlmService (iteration ${toolIterations + 1}, retry ${retryAttempts})`);
+
+      const response = await llmService.getAiResponse({ messages });
       lastAssistantMessage = response;
-      
+
       // Parse the assistant's response
       const contentBlocks = parseAssistantMessage(response);
-      
+
       // Check if the response is valid (has content or tool calls)
       hasValidResponse = isValidResponse(contentBlocks);
-      
+
       if (!hasValidResponse && retryAttempts < MAX_RETRY_ATTEMPTS - 1) {
         // Invalid response format, break inner loop to retry
         console.log("Invalid response format detected, will retry...");
         break;
       }
-      
+
       let hasToolCall = false;
-      
+
       for (const block of contentBlocks) {
         if (block.type === "text" && block.content) {
           finalResponse += block.content;
         } else if (block.type === "tool_use" && block.tool) {
           hasToolCall = true;
-          
+
           // Execute the tool
           const result = await executeTool(block.tool);
-          
+
           if (result.requiresUserResponse) {
             // For tools like ask_followup_question, we need to return immediately
             pendingUserResponse = true;
-            
+
             if (result.result?.type === "followup_question") {
               // Store the tool result for inline keyboard
               lastToolResult = result.result;
-              
+
               // Format the question for the user
               let questionText = result.result.question;
               // Don't add options as text if we have them - they'll be shown as buttons
@@ -105,22 +104,22 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
             }
             break;
           }
-          
+
           // Format the tool result and add it to the conversation
           const toolResultMessage = formatExecutionResult(block.tool.name, result);
-          
+
           // Add assistant message with tool call to messages
           messages.push({
             role: "assistant",
             content: response
           });
-          
+
           // Add tool result as user message
           messages.push({
             role: "user",
             content: toolResultMessage
           });
-          
+
           // Store in conversation history
           await conversationHistory.addMessage(chatId, {
             role: "assistant",
@@ -132,47 +131,47 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
           });
         }
       }
-      
+
       if (pendingUserResponse) {
         // Return immediately for user response
         return finalResponse;
       }
-      
+
       if (!hasToolCall) {
         // No more tool calls, we're done with iterations
         break;
       }
-      
+
       toolIterations++;
     }
-    
+
     // Check if we need to retry due to invalid response format
     if (!hasValidResponse && retryAttempts < MAX_RETRY_ATTEMPTS - 1) {
       console.log(`Invalid response format. Retrying... (attempt ${retryAttempts + 1})`);
-      
+
       // Add error message to force proper response
       const errorMessage: OpenRouterMessage = {
         role: "user",
         content: generateInvalidResponseError()
       };
-      
+
       messages.push({
         role: "assistant",
         content: lastAssistantMessage
       });
       messages.push(errorMessage);
-      
+
       // Store the failed attempt in history
       await conversationHistory.addMessage(chatId, {
         role: "assistant",
         content: lastAssistantMessage
       });
       await conversationHistory.addMessage(chatId, errorMessage);
-      
+
       retryAttempts++;
       continue; // Retry the whole process
     }
-    
+
     // If we have a valid response, store and return it
     if (hasValidResponse) {
       // Store final assistant message if not already stored
@@ -182,22 +181,22 @@ export async function getAIResponse(userMessage: string, chatId: number): Promis
           content: lastAssistantMessage,
         });
       }
-      
+
       // Clean up any remaining XML tags from the response
       finalResponse = finalResponse.replace(/<\/?[^>]+(>|$)/g, "").trim();
-      
+
       // Clear lastToolResult if this wasn't a followup question
       if (!pendingUserResponse) {
         lastToolResult = null;
       }
-      
+
       return finalResponse || "I apologize, but I couldn't generate a proper response. Please try again.";
     }
-    
+
     // If still no valid response after all retries, break
     break;
   }
-  
+
   // If we've exhausted retries, return a fallback message
   return "I apologize, but I'm having trouble generating a proper response. Please try again.";
 }

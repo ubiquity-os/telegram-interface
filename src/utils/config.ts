@@ -9,36 +9,36 @@ interface Config {
 }
 
 export async function getConfig(): Promise<Config> {
-  // Bun automatically loads .env files, so we can access them via process.env
+  // Bun automatically loads .env files, so we can access them via Deno.env.get()
   // Determine bot type - defaults to production for backward compatibility
-  const botType = (process.env.BOT_TYPE || "production") as "production" | "preview";
+  const botType = (Deno.env.get("BOT_TYPE") || "production") as "production" | "preview";
 
   // Get appropriate bot token based on bot type
   let botToken: string;
   if (botType === "preview") {
-    botToken = process.env.PREVIEW_BOT_TOKEN || "";
+    botToken = Deno.env.get("PREVIEW_BOT_TOKEN") || "";
     if (!botToken) throw new Error("PREVIEW_BOT_TOKEN is required when BOT_TYPE=preview");
   } else {
-    botToken = process.env.BOT_TOKEN || "";
+    botToken = Deno.env.get("BOT_TOKEN") || "";
     if (!botToken) throw new Error("BOT_TOKEN is required when BOT_TYPE=production");
   }
 
   // Get webhook secret
   const webhookSecret = botType === "preview"
-    ? process.env.WEBHOOK_SECRET_PREVIEW || ""
-    : process.env.WEBHOOK_SECRET_PRODUCTION || "";
+    ? Deno.env.get("WEBHOOK_SECRET_PREVIEW") || ""
+    : Deno.env.get("WEBHOOK_SECRET_PRODUCTION") || "";
 
   // Get OpenRouter API key
-  const openRouterApiKey = process.env.OPENROUTER_API_KEY || "";
+  const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY") || "";
   if (!openRouterApiKey) throw new Error("OPENROUTER_API_KEY is required");
 
   return {
     botToken,
     botType,
     webhookSecret,
-    logLevel: (process.env.LOG_LEVEL || "info") as Config["logLevel"],
-    environment: (process.env.ENVIRONMENT || "development") as Config["environment"],
+    logLevel: (Deno.env.get("LOG_LEVEL") || "info") as Config["logLevel"],
+    environment: (Deno.env.get("ENVIRONMENT") || "development") as Config["environment"],
     openRouterApiKey,
-    deploymentUrl: process.env.DEPLOYMENT_URL,
+    deploymentUrl: Deno.env.get("DEPLOYMENT_URL"),
   };
 }

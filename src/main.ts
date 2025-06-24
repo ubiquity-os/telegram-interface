@@ -35,18 +35,18 @@ Deno.serve({
     try {
       const body = await req.json();
 
-      // Validate request body
-      if (!body.message || typeof body.message !== "string") {
+      // Validate request body format: { userId: string, chatId: string, text: string }
+      if (!body.text || typeof body.text !== "string") {
         return new Response(JSON.stringify({
           success: false,
-          error: "Missing or invalid 'message' field"
+          error: "Missing or invalid 'text' field"
         }), {
           status: 400,
           headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (!body.chatId || typeof body.chatId !== "number") {
+      if (!body.chatId || typeof body.chatId !== "string") {
         return new Response(JSON.stringify({
           success: false,
           error: "Missing or invalid 'chatId' field"
@@ -56,8 +56,18 @@ Deno.serve({
         });
       }
 
-      // Import and use the test message handler
-      const { handleTestMessage } = await import("./services/test-message-handler.ts");
+      if (!body.userId || typeof body.userId !== "string") {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Missing or invalid 'userId' field"
+        }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Import and use the new test message handler
+      const { handleTestMessage } = await import("./handlers/test-message-handler.ts");
       const result = await handleTestMessage(body);
 
       return new Response(JSON.stringify(result, null, 2), {
