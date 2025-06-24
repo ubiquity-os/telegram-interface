@@ -1,14 +1,15 @@
+/// <reference types="../deno.d.ts" />
 import { getConfig } from "../src/utils/config.ts";
 
 type BotType = "production" | "preview" | "all";
 
 function parseArgs(): { botType: BotType } {
-  const args = process.argv.slice(2);
+  const args = Deno.args;
   let botType: BotType = "all"; // Default to showing all
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
+
     if (arg === "--bot-type") {
       const nextArg = args[i + 1];
       if (nextArg === "production" || nextArg === "preview" || nextArg === "all") {
@@ -16,7 +17,7 @@ function parseArgs(): { botType: BotType } {
         i++; // Skip next argument since we consumed it
       } else {
         console.error("❌ Error: --bot-type must be 'production', 'preview', or 'all'");
-        process.exit(1);
+        Deno.exit(1);
       }
     }
   }
@@ -42,21 +43,21 @@ async function checkWebhookForBot(botType: "production" | "preview"): Promise<vo
 
   // Get config with the appropriate bot type
   // Set BOT_TYPE environment variable temporarily to get the right config
-  const originalBotType = process.env.BOT_TYPE;
-  process.env.BOT_TYPE = botType;
-  
+  const originalBotType = Deno.env.get("BOT_TYPE");
+  Deno.env.set("BOT_TYPE", botType);
+
   let config;
   try {
-    config = getConfig();
+    config = await getConfig(true); // Force reload to pick up the temporary BOT_TYPE
   } catch (error) {
     console.error(`❌ Error getting config for ${botType} bot: ${error.message}`);
     return;
   } finally {
     // Restore original BOT_TYPE
     if (originalBotType) {
-      process.env.BOT_TYPE = originalBotType;
+      Deno.env.set("BOT_TYPE", originalBotType);
     } else {
-      delete process.env.BOT_TYPE;
+      Deno.env.delete("BOT_TYPE");
     }
   }
 
@@ -64,9 +65,9 @@ async function checkWebhookForBot(botType: "production" | "preview"): Promise<vo
     const response = await fetch(
       `https://api.telegram.org/bot${config.botToken}/getWebhookInfo`
     );
-    
+
     const data = await response.json();
-    
+
     if (data.ok) {
       console.log(`✅ ${botType.charAt(0).toUpperCase() + botType.slice(1)} Bot Webhook Status:`);
       console.log(`- URL: ${data.result.url || "Not set"}`);
@@ -83,7 +84,7 @@ async function checkWebhookForBot(botType: "production" | "preview"): Promise<vo
   } catch (error) {
     console.error(`❌ Error checking webhook for ${botType} bot:`, error);
   }
-  
+
   console.log(""); // Add spacing between bots
 }
 
@@ -91,9 +92,9 @@ async function main() {
   const { botType } = parseArgs();
 
   // Show help if requested
-  if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  if (Deno.args.includes("--help") || Deno.args.includes("-h")) {
     printUsage();
-    process.exit(0);
+    Deno.exit(0);
   }
 
   try {
@@ -106,7 +107,7 @@ async function main() {
   } catch (error) {
     console.error("❌ Error:", error.message);
     console.log("\n💡 Run with --help for usage information");
-    process.exit(1);
+    Deno.exit(1);
   }
 }
 

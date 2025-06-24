@@ -8,7 +8,7 @@ export async function callOpenRouter(
   model: string,
   timeoutMs: number = TIMEOUT_MS
 ): Promise<string> {
-  const config = getConfig();
+  const config = await getConfig();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -36,7 +36,7 @@ export async function callOpenRouter(
     }
 
     const data = await response.json() as OpenRouterResponse;
-    
+
     if (!data.choices?.[0]?.message?.content) {
       throw new Error("No response content from OpenRouter");
     }
@@ -44,11 +44,11 @@ export async function callOpenRouter(
     return data.choices[0].message.content;
   } catch (error) {
     clearTimeout(timeoutId);
-    
+
     if (error.name === "AbortError") {
       throw new Error(`OpenRouter request timed out after ${timeoutMs}ms`);
     }
-    
+
     throw error;
   }
 }

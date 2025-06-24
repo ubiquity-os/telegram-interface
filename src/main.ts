@@ -3,8 +3,9 @@ import { createBot } from "./bot.ts";
 import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
 
-const bot = createBot();
-const config = getConfig();
+// Load config and create bot
+const config = await getConfig();
+const bot = createBot(config.botToken);
 
 // Create webhook handler
 const handleUpdate = webhookCallback(bot, "std/http");
@@ -35,10 +36,10 @@ Deno.serve({
       const params = url.searchParams;
       const chatIdParam = params.get("chatId");
       const limitParam = params.get("limit");
-      
+
       // Dynamically import conversation history to avoid initialization issues
       const { conversationHistory } = await import("./services/conversation-history.ts");
-      
+
       // If specific chatId is requested
       if (chatIdParam) {
         const chatId = parseInt(chatIdParam);
@@ -50,16 +51,16 @@ Deno.serve({
             headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         const history = await conversationHistory.getHistory(chatId);
         const { countTokens } = await import("./utils/token-counter.ts");
-        
+
         // Calculate total tokens for this conversation
         let totalTokens = 0;
         for (const msg of history) {
           totalTokens += countTokens(msg.content);
         }
-        
+
         return new Response(JSON.stringify({
           chatId,
           messageCount: history.length,
@@ -70,30 +71,30 @@ Deno.serve({
           headers: { "Content-Type": "application/json" },
         });
       }
-      
+
       // Get all conversations
       const kv = await Deno.openKv();
       const conversations: any[] = [];
       const limit = limitParam ? parseInt(limitParam) : undefined;
       let count = 0;
-      
+
       // Iterate through all chat entries
       const iter = kv.list({ prefix: ["chat"] });
       for await (const entry of iter) {
         if (entry.key[2] === "messages" && entry.value) {
-          const chatId = entry.key[1];
+          const chatId = String(entry.key[1]);
           const messages = entry.value as any[];
-          
+
           // Apply limit if specified
           if (limit && count >= limit) break;
-          
+
           // Calculate tokens for this conversation
           const { countTokens } = await import("./utils/token-counter.ts");
           let totalTokens = 0;
           for (const entry of messages) {
             totalTokens += countTokens(entry.message.content);
           }
-          
+
           conversations.push({
             chatId,
             messageCount: messages.length,
@@ -103,14 +104,14 @@ Deno.serve({
             // Include actual messages if not too many
             messages: messages.length <= 10 ? messages : `[${messages.length} messages - use ?chatId=${chatId} to view all]`
           });
-          
+
           count++;
         }
       }
-      
+
       // Get overall stats
       const stats = await conversationHistory.getStats();
-      
+
       return new Response(JSON.stringify({
         stats: {
           totalChats: stats.totalChats,
@@ -133,7 +134,7 @@ Deno.serve({
       }, null, 2), {
         headers: { "Content-Type": "application/json" },
       });
-      
+
     } catch (error) {
       console.error("Conversations endpoint error:", error);
       return new Response(JSON.stringify({
@@ -152,26 +153,26 @@ Deno.serve({
       // Parse the update to check for duplicates
       const bodyText = await req.text();
       const update = JSON.parse(bodyText);
-      
+
       // Check if we've already processed this update
       if (update.update_id && deduplicationService.hasProcessed(update.update_id)) {
         console.log(`Duplicate update detected: ${update.update_id}, skipping processing`);
         return new Response("OK", { status: 200 });
       }
-      
+
       // Mark update as processed
       if (update.update_id) {
         deduplicationService.markAsProcessed(update.update_id);
         console.log(`Processing new update: ${update.update_id}`);
       }
-      
+
       // Process the update asynchronously (don't await)
       // This allows us to return 200 OK immediately
       processUpdateAsync(bodyText);
-      
+
       // Return 200 OK immediately to acknowledge webhook
       return new Response("OK", { status: 200 });
-      
+
     } catch (error) {
       console.error("Webhook error:", error);
       return new Response("Internal Server Error", { status: 500 });
@@ -191,7 +192,7 @@ async function processUpdateAsync(bodyText: string) {
       headers: { "Content-Type": "application/json" },
       body: bodyText,
     });
-    
+
     // Let grammy handle the update
     await handleUpdate(fakeRequest);
   } catch (error) {

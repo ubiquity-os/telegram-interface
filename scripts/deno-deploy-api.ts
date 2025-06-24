@@ -1,10 +1,3 @@
-declare namespace Deno {
-  export const env: {
-    get(key: string): string | undefined;
-  };
-  export const mainModule: string;
-}
-
 export interface DenoDeployment {
   id: string;
   url: string;
@@ -46,17 +39,17 @@ export class DenoDeployApi {
   private baseUrl = "https://api.deno.com/v1";
 
   constructor(token?: string, projectName?: string) {
-    this.token = token || Deno.env.get("DENO_DEPLOY_TOKEN") || "";
-    this.projectName = projectName || Deno.env.get("DENO_PROJECT_NAME") || "telegram-interface";
-    
+    this.token = token || Deno.env.get("DEPLOY_TOKEN") || Deno.env.get("DENO_DEPLOY_TOKEN") || "";
+    this.projectName = projectName || Deno.env.get("DEPLOY_PROJECT_NAME") || "telegram-interface";
+
     if (!this.token) {
-      throw new Error("DENO_DEPLOY_TOKEN environment variable is required");
+      throw new Error("DEPLOY_TOKEN or DENO_DEPLOY_TOKEN environment variable is required");
     }
   }
 
   private async request<T>(endpoint: string): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
-    
+
     try {
       const response = await fetch(url, {
         headers: {
@@ -87,7 +80,7 @@ export class DenoDeployApi {
     const response = await this.request<any>(
       `/projects/${this.projectName}/deployments?page=${page}&limit=${limit}`
     );
-    
+
     // Handle different response formats
     if (Array.isArray(response)) {
       // New format: array of deployments
@@ -108,11 +101,11 @@ export class DenoDeployApi {
   async getLatestDeploymentUrl(isProduction: boolean): Promise<string> {
     try {
       const deploymentsResponse = await this.getDeployments(1, 50);
-      
+
       // Filter for successful deployments
       const validDeployments = deploymentsResponse.deployments.filter(
-        deployment => 
-          deployment.status === "success" && 
+        deployment =>
+          deployment.status === "success" &&
           deployment.url
       );
 
@@ -124,7 +117,7 @@ export class DenoDeployApi {
       // Find production deployment if requested
       if (isProduction) {
         const productionDeployment = validDeployments.find(
-          d => d.isProductionDeployment
+          d => d.branch === "main" // Or your main branch name
         );
         if (productionDeployment) {
           return productionDeployment.url;
@@ -134,18 +127,22 @@ export class DenoDeployApi {
 
       // For preview, find the latest non-production deployment
       const previewDeployments = validDeployments.filter(
-        d => !d.isProductionDeployment
+        d => d.domains.some(domain => domain.includes("preview"))
       );
 
+      console.log("--- DEBUG: Filtered Preview Deployments ---");
+      console.log(JSON.stringify(previewDeployments.map(d => ({url: d.url, domains: d.domains, branch: d.branch, status: d.status})), null, 2));
+      console.log("--- END DEBUG ---");
+
       if (previewDeployments.length === 0) {
-        throw new Error("No preview deployments found");
+        throw new Error("No recent, successful preview deployments found.");
       }
 
       // Sort deployments by createdAt date (newest first)
       previewDeployments.sort((a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
-  
+
       // Return the most recent preview deployment URL
       return previewDeployments[0].url;
     } catch (error) {
@@ -155,24 +152,7 @@ export class DenoDeployApi {
   }
 }
 
-export async function getDeploymentUrl(isProduction: boolean): Promise<string> {
-  const api = new DenoDeployApi();
+export async function getDeploymentUrl(isProduction: boolean, projectName?: string): Promise<string> {
+  const api = new DenoDeployApi(undefined, projectName);
   return await api.getLatestDeploymentUrl(isProduction);
-}
-
-// Temporary debug function
-async function debugProject() {
-  try {
-    const api = new DenoDeployApi();
-    const project = await api.getProject();
-    console.log("Project Details:", project);
-    const deployments = await api.getDeployments();
-    console.log("Latest Deployments:", deployments);
-  } catch (error) {
-    console.error("Debug Error:", error);
-  }
-}
-
-if (import.meta.url === Deno.mainModule) {
-  debugProject();
 }
