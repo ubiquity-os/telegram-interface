@@ -1,3 +1,4 @@
+/// <reference types="../deno.d.ts" />
 import { getConfig } from "../src/utils/config.ts";
 import { getDeploymentUrl } from "./deno-deploy-api.ts";
 
@@ -10,7 +11,7 @@ function parseArgs(): { botType: BotType; deploymentUrl?: string } {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
+
     if (arg === "--bot-type") {
       const nextArg = args[i + 1];
       if (nextArg === "production" || nextArg === "preview") {
@@ -43,8 +44,8 @@ function printUsage() {
   console.log("  bun run scripts/set-webhook.ts --bot-type production https://custom.deno.dev");
   console.log("");
   console.log("Environment variables needed:");
-  console.log("  DENO_DEPLOY_TOKEN    - Deno Deploy API token");
-  console.log("  DENO_PROJECT_NAME    - Project name (defaults to 'telegram-interface')");
+  console.log("  DEPLOY_TOKEN    - Deno Deploy API token");
+  console.log("  DEPLOY_PROJECT_NAME    - Project name (defaults to 'telegram-interface')");
 }
 
 async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<void> {
@@ -54,7 +55,7 @@ async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<v
   // Set BOT_TYPE environment variable temporarily to get the right config
   const originalBotType = process.env.BOT_TYPE;
   process.env.BOT_TYPE = botType;
-  
+
   let config;
   try {
     config = getConfig();
@@ -74,7 +75,7 @@ async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<v
     console.log(`📍 Using manual URL: ${deploymentUrl}`);
   } else {
     try {
-      deploymentUrl = await getDeploymentUrl(botType);
+      deploymentUrl = await getDeploymentUrl(botType === "production");
       console.log(`📍 Auto-detected URL: ${deploymentUrl}`);
     } catch (error) {
       console.error(`❌ Error getting deployment URL: ${error.message}`);
@@ -93,7 +94,7 @@ async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<v
   }
 
   const webhookUrl = `${deploymentUrl}/webhook/${config.webhookSecret}`;
-  
+
   console.log(`🤖 Bot type: ${botType}`);
   console.log(`🔗 Webhook URL: ${webhookUrl}`);
 
@@ -115,13 +116,13 @@ async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<v
   if (result.ok) {
     console.log("✅ Webhook successfully set!");
     console.log("📋 Details:", result);
-    
+
     // Get webhook info to verify
     const infoResponse = await fetch(
       `https://api.telegram.org/bot${config.botToken}/getWebhookInfo`
     );
     const info = await infoResponse.json();
-    
+
     if (info.ok) {
       console.log(`\n📊 Current webhook info for ${botType} bot:`);
       console.log(`- URL: ${info.result.url}`);
