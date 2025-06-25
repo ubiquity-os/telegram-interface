@@ -32,6 +32,21 @@ export interface SystemOrchestratorConfig {
   mcpToolManagerConfig?: any;
   selfModerationConfig?: any;
 
+  // Message queue configuration
+  messageQueue?: {
+    workerConfig: {
+      minWorkers: number;
+      maxWorkers: number;
+      idleTimeout: number;
+    };
+    retryConfig: {
+      maxRetries: number;
+      initialDelay: number;
+      maxDelay: number;
+      multiplier: number;
+    };
+  };
+
   // Feature flags
   enableMCPTools: boolean;
   enableSelfModeration: boolean;
@@ -80,6 +95,15 @@ export interface SystemMetrics {
   averageResponseTime: number;
   activeRequests: number;
   errorRate: number;
+  // Message queue metrics
+  queueStats?: {
+    totalMessages: number;
+    queueDepth: number;
+    processingRate: number;
+    averageWaitTime: number;
+    activeWorkers: number;
+    messagesByPriority: Record<string, number>;
+  };
 }
 
 /**

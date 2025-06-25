@@ -9,7 +9,7 @@ import { SystemOrchestrator } from "./components/system-orchestrator/index.ts";
 import { TelegramInterfaceAdapter } from "./components/telegram-interface-adapter/telegram-interface-adapter.ts";
 import { MessagePreProcessor } from "./components/message-pre-processor/index.ts";
 import { DecisionEngine } from "./components/decision-engine/decision-engine.ts";
-import { ContextManager } from "./components/context-manager/index.ts";
+import { CachedContextManager, CachedContextManagerConfig } from "./components/context-manager/index.ts";
 import { ResponseGenerator } from "./components/response-generator/index.ts";
 import { KVContextStorage } from "./components/context-manager/kv-context-storage.ts";
 import { LLMServiceAdapter } from "./components/message-pre-processor/llm-service-adapter.ts";
@@ -19,7 +19,6 @@ import { SystemOrchestratorConfig, ComponentDependencies } from "./components/sy
 import { TelegramInterfaceAdapterConfig } from "./components/telegram-interface-adapter/types.ts";
 import { MessagePreProcessorConfig } from "./components/message-pre-processor/types.ts";
 import { DecisionEngineConfig } from "./components/decision-engine/types.ts";
-import { ContextManagerConfig } from "./components/context-manager/types.ts";
 import { ResponseGeneratorConfig } from "./components/response-generator/types.ts";
 
 // Load config
@@ -53,7 +52,7 @@ const messagePreProcessorConfig: MessagePreProcessorConfig = {
   confidenceThreshold: 0.8
 };
 
-const contextConfig: ContextManagerConfig = {
+const contextConfig: CachedContextManagerConfig = {
   storage: {
     type: 'deno-kv',
     kvPath: undefined // Use default KV path
@@ -67,6 +66,12 @@ const contextConfig: ContextManagerConfig = {
     enabled: true,
     interval: 60 * 60 * 1000, // 1 hour
     batchSize: 10
+  },
+  cache: {
+    maxSize: 100,
+    contextTTL: 30 * 60 * 1000, // 30 minutes
+    preferencesTTL: 60 * 60 * 1000, // 1 hour
+    enableMetrics: true
   }
 };
 
@@ -97,7 +102,7 @@ const decisionEngine = new DecisionEngine({
   debugMode: false
 });
 
-const contextManager = new ContextManager(
+const contextManager = new CachedContextManager(
   contextConfig,
   contextStorage
 );
@@ -130,7 +135,21 @@ const orchestratorConfig: SystemOrchestratorConfig = {
   enableErrorRecovery: true,
   requestTimeout: 30000,
   maxRetries: 3,
-  logLevel: 'info'
+  logLevel: 'info',
+  // Message queue configuration
+  messageQueue: {
+    workerConfig: {
+      minWorkers: 2,
+      maxWorkers: 10,
+      idleTimeout: 30000
+    },
+    retryConfig: {
+      maxRetries: 3,
+      initialDelay: 1000,
+      maxDelay: 30000,
+      multiplier: 2
+    }
+  }
 };
 
 // Create component dependencies

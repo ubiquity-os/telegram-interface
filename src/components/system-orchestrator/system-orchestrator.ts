@@ -75,6 +75,18 @@ import {
 
 import { ModerationResult, ModerationIssue } from '../self-moderation-engine/types.ts';
 
+// Import Message Queue
+import {
+  MessageQueue,
+  MessagePriority,
+  MessagePriorityEnum,
+  QueuedMessage,
+  MessageQueueConfig,
+  QueueEventType,
+  QueueEventTypeEnum,
+  QueueEvent
+} from '../../services/message-queue/index.ts';
+
 export class SystemOrchestrator implements ISystemOrchestrator {
   private config!: SystemOrchestratorConfig;
   private components: Map<string, ManagedComponent> = new Map();
@@ -93,6 +105,9 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   private responseGenerator!: IResponseGenerator;
   private mcpToolManager?: IMCPToolManager;
   private selfModerationEngine?: ISelfModerationEngine;
+
+  // Message queue
+  private messageQueue?: MessageQueue;
 
   constructor(private dependencies: ComponentDependencies) {
     this.startTime = new Date();
@@ -123,6 +138,9 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
       // Set up component event handlers
       await this.setupComponentHandlers();
+
+      // Initialize message queue if configured
+      await this.initializeMessageQueue();
 
       this.isInitialized = true;
 
@@ -204,8 +222,116 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     console.log('[SystemOrchestrator] Component handlers configured');
   }
 
+  /**
+   * Initialize the message queue
+   */
+  private async initializeMessageQueue(): Promise<void> {
+    if (!this.config.messageQueue) {
+      console.log('[SystemOrchestrator] Message queue not configured, using direct processing');
+      return;
+    }
+
+    console.log('[SystemOrchestrator] Initializing message queue...');
+
+    // Create message queue configuration
+    const queueConfig: MessageQueueConfig = {
+      maxQueueSize: 1000,
+      workerPool: {
+        minWorkers: this.config.messageQueue.workerConfig.minWorkers,
+        maxWorkers: this.config.messageQueue.workerConfig.maxWorkers,
+        workerIdleTimeout: this.config.messageQueue.workerConfig.idleTimeout,
+        autoscale: true,
+        scalingThreshold: 50
+      },
+      priorityBoost: {
+        commands: true,
+        adminUsers: [],
+        keywords: ['help', 'start', 'stop']
+      },
+      deadLetterQueue: {
+        enabled: true,
+        maxRetries: this.config.messageQueue.retryConfig.maxRetries
+      }
+    };
+
+    // Create message queue
+    this.messageQueue = new MessageQueue(queueConfig);
+
+    // Subscribe to queue events
+    this.messageQueue.on(QueueEventTypeEnum.MESSAGE_FAILED, (event: QueueEvent) => {
+      console.error('[SystemOrchestrator] Message processing failed:', event.data);
+      // The dead letter queue will handle retry logic
+    });
+
+    this.messageQueue.on(QueueEventTypeEnum.QUEUE_FULL, (event: QueueEvent) => {
+      console.warn('[SystemOrchestrator] Message queue is full:', event.data);
+    });
+
+    // Start the queue with our message processor
+    await this.messageQueue.start(this.processQueuedMessage.bind(this));
+
+    console.log('[SystemOrchestrator] Message queue initialized and started');
+  }
+
+  /**
+   * Process a message from the queue
+   */
+  private async processQueuedMessage(queuedMessage: QueuedMessage): Promise<void> {
+    const { update, metadata } = queuedMessage;
+    const requestId = queuedMessage.id;
+
+    // Process the update with existing logic
+    await this.processUpdate(update, requestId);
+  }
+
+  /**
+   * Determine message priority based on content and context
+   */
+  private determineMessagePriority(update: TelegramUpdate): MessagePriority {
+    // Check if it's a command
+    if (update.message?.text?.startsWith('/')) {
+      return MessagePriorityEnum.HIGH;
+    }
+
+    // Check for system messages or errors
+    if (update.message?.text?.toLowerCase().includes('error') ||
+        update.message?.text?.toLowerCase().includes('help')) {
+      return MessagePriorityEnum.HIGH;
+    }
+
+    // Check for callback queries (button presses)
+    if (update.callback_query) {
+      return MessagePriorityEnum.HIGH;
+    }
+
+    // Default to normal priority
+    return MessagePriorityEnum.NORMAL;
+  }
+
   async handleUpdate(update: TelegramUpdate): Promise<void> {
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // If message queue is enabled, enqueue the message
+    if (this.messageQueue) {
+      try {
+        const priority = this.determineMessagePriority(update);
+        const messageId = await this.messageQueue.enqueue(update, priority);
+        console.log(`[SystemOrchestrator] Message enqueued with ID: ${messageId}, priority: ${MessagePriorityEnum[priority]}`);
+      } catch (error) {
+        console.error('[SystemOrchestrator] Failed to enqueue message:', error);
+        // Fall back to direct processing
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        await this.processUpdate(update, requestId);
+      }
+    } else {
+      // Direct processing without queue
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      await this.processUpdate(update, requestId);
+    }
+  }
+
+  /**
+   * Process an update (either directly or from the queue)
+   */
+  private async processUpdate(update: TelegramUpdate, requestId: string): Promise<void> {
     const requestContext: RequestContext = {
       requestId,
       update,
@@ -648,12 +774,31 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
     const uptime = Date.now() - this.startTime.getTime();
 
+    // Include message queue stats if queue is enabled
+    const metrics = { ...this.metrics };
+    if (this.messageQueue) {
+      const queueStats = this.messageQueue.getStats();
+      metrics.queueStats = {
+        totalMessages: queueStats.totalMessages,
+        queueDepth: queueStats.queueDepth,
+        processingRate: queueStats.processingRate,
+        averageWaitTime: queueStats.averageWaitTime,
+        activeWorkers: queueStats.activeWorkers,
+        messagesByPriority: Object.fromEntries(
+          Object.entries(queueStats.messagesByPriority).map(([key, value]) => [
+            MessagePriorityEnum[parseInt(key)] || key,
+            value
+          ])
+        )
+      };
+    }
+
     return {
       overall,
       components: componentStatuses,
       lastHealthCheck: new Date(),
       uptime,
-      metrics: { ...this.metrics }
+      metrics
     };
   }
 
@@ -747,6 +892,12 @@ export class SystemOrchestrator implements ISystemOrchestrator {
         reason: 'System shutdown requested'
       }
     });
+
+    // Stop message queue if running
+    if (this.messageQueue) {
+      console.log('[SystemOrchestrator] Stopping message queue...');
+      await this.messageQueue.stop();
+    }
 
     // Shutdown components in reverse order
     const sortedComponents = Array.from(this.components.values())
