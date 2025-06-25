@@ -1,8 +1,104 @@
 # Project Execution Rules
-- ALWAYS use Deno for running TypeScript files in this project
+
+## Runtime and Package Management
+- ALWAYS use Deno for running TypeScript files in this project (NOT Bun)
 - NEVER use Bun for execution or package management
 - Use `deno run` instead of `bun run` for all scripts
 - Use `deno install` instead of `bun install` for dependencies
 - Use `Deno.env.get()` instead of `process.env` for environment variables
 - Use `--allow-env` flag when environment access is needed
 - Use `--allow-net` flag when network access is needed
+
+## Project-Specific Patterns
+
+### Architecture Patterns
+- This is a COMPONENT-BASED architecture with strict separation of concerns
+- Follow the event-driven pattern using the central event bus
+- All external integrations use the MCP (Model Context Protocol) pattern
+- Error handling follows circuit breaker patterns throughout
+- Caching follows multi-layer strategy (LRU + TTL + Deno KV)
+- Message processing follows queue-based worker pool pattern
+
+### Development Workflow
+- Phase-based development: currently completed Phase 3, entering Phase 4
+- Documentation-first approach: always update docs when making changes
+- TypeScript strict mode enforced throughout
+- Component isolation with interface-based contracts
+- Performance-first mindset for serverless deployment
+
+### File Organization Critical Patterns
+- Components live in `src/components/` with index.ts exports
+- Services live in `src/services/` for core system services
+- Each component has its own types.ts file for interfaces
+- Test files mirror source structure in `tests/` directory
+- All new files use kebab-case.ts naming convention
+
+### Deployment and Environment Patterns
+- Dual deployment: production (main branch) + preview (feature branches)
+- Environment-based configuration through Deno Deploy dashboard
+- Webhook management is automated through GitHub Actions
+- Health checks required for all deployments at `/health` endpoint
+- Secrets management through environment variables only
+
+### Integration Patterns
+- MCP servers for external tool integration
+- OpenRouter for LLM services (not direct provider APIs)
+- Deno KV for all persistent storage needs
+- Grammy framework for Telegram integration
+- Connection pooling for all external services
+
+### Performance Optimization Patterns
+- Message queue with priority processing for handling bursts
+- Connection pools with health checks for external services
+- Multi-layer caching (memory LRU + persistent KV) with TTL
+- Circuit breaker patterns for resilience
+- Lazy loading for components and connections
+- Response time target: <2 seconds always
+
+### Code Quality Patterns
+- Strict TypeScript with no implicit any
+- Component-based testing with mocks for external dependencies
+- Error-first design with comprehensive error handling
+- Event-driven loose coupling between components
+- Interface-based contracts for all component interactions
+
+### Testing Strategy
+- Unit tests for individual components with mocks
+- Integration tests for message flow end-to-end
+- Performance tests for load and response time validation
+- Health check tests for deployment validation
+- Target: >80% code coverage for Phase 4
+
+### Documentation Maintenance
+- Core docs structure must be maintained: project-brief.md → product-context.md → system-patterns.md → tech-context.md → active-context.md → progress.md
+- Update active-context.md for current focus changes
+- Update progress.md for feature completion status
+- Implementation-specific docs in separate files
+- Always document architectural decisions and patterns
+
+### Critical Implementation Details
+- Phase 3 COMPLETED: Message queue, connection pool, context caching all operational
+- System is production-ready with >99.9% availability
+- All TypeScript compilation errors resolved
+- Performance targets achieved (<2s response time)
+- Ready for Phase 4: Testing and Monitoring
+
+### Known Project Evolution
+- Started as simple Telegram bot (Phase 1)
+- Added AI capabilities and conversation management (Phase 2)
+- Added sophisticated performance and scaling architecture (Phase 3 - COMPLETE)
+- Next: Comprehensive testing and monitoring (Phase 4)
+- Future: Production deployment and optimization (Phase 5)
+
+### Development Environment Specifics
+- Uses Grammy framework specifically for Deno (not other Telegram libraries)
+- OpenRouter API for LLM access (not direct model provider APIs)
+- Deno KV for storage (not external databases)
+- Edge deployment on Deno Deploy (not traditional servers)
+- Serverless-optimized with automatic scaling
+
+### User Instructions Override
+- This project uses DENO not BUN (overrides global Bun preference)
+- Project has specific documentation structure that must be maintained
+- Follow component-based architecture strictly
+- Performance optimizations are critical for serverless constraints
