@@ -10,6 +10,9 @@ export interface TelegramMessage {
   text?: string;
   callbackData?: string;
   timestamp: Date;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
 }
 
 // Telegram response format
@@ -18,6 +21,7 @@ export interface TelegramResponse {
   text: string;
   replyMarkup?: InlineKeyboard;
   parseMode?: 'Markdown' | 'HTML';
+  replyToMessageId?: number;
 }
 
 // Inline keyboard types

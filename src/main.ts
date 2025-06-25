@@ -1,14 +1,166 @@
-import { webhookCallback } from "grammy";
-import { createBot } from "./bot.ts";
 import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
+import { eventBus, createEventEmitter, SystemEventType } from "./services/event-bus/index.ts";
+import { LlmService } from "./services/llm-service/index.ts";
+import { SimpleErrorHandler } from "./services/error-handler.ts";
 
-// Load config and create bot
+// Import all components
+import { SystemOrchestrator } from "./components/system-orchestrator/index.ts";
+import { TelegramInterfaceAdapter } from "./components/telegram-interface-adapter/telegram-interface-adapter.ts";
+import { MessagePreProcessor } from "./components/message-pre-processor/index.ts";
+import { DecisionEngine } from "./components/decision-engine/decision-engine.ts";
+import { ContextManager } from "./components/context-manager/index.ts";
+import { ResponseGenerator } from "./components/response-generator/index.ts";
+import { KVContextStorage } from "./components/context-manager/kv-context-storage.ts";
+import { LLMServiceAdapter } from "./components/message-pre-processor/llm-service-adapter.ts";
+
+// Import types
+import { SystemOrchestratorConfig, ComponentDependencies } from "./components/system-orchestrator/types.ts";
+import { TelegramInterfaceAdapterConfig } from "./components/telegram-interface-adapter/types.ts";
+import { MessagePreProcessorConfig } from "./components/message-pre-processor/types.ts";
+import { DecisionEngineConfig } from "./components/decision-engine/types.ts";
+import { ContextManagerConfig } from "./components/context-manager/types.ts";
+import { ResponseGeneratorConfig } from "./components/response-generator/types.ts";
+
+// Load config
 const config = await getConfig();
-const bot = createBot(config.botToken);
 
-// Create webhook handler
-const handleUpdate = webhookCallback(bot, "std/http");
+// Create LLM service instance
+const llmService = new LlmService();
+const llmServiceAdapter = new LLMServiceAdapter();
+
+// Create component configurations
+const telegramConfig: TelegramInterfaceAdapterConfig = {
+  botToken: config.botToken,
+  maxMessageLength: 4096,
+  rateLimits: {
+    maxMessagesPerSecond: 30,
+    maxMessagesPerMinute: 20 * 60,
+    maxMessagesPerHour: 1000 * 60
+  },
+  queueConfig: {
+    maxQueueSize: 100,
+    processingInterval: 100,
+    maxRetries: 3
+  }
+};
+
+const messagePreProcessorConfig: MessagePreProcessorConfig = {
+  maxCacheSize: 1000,
+  cacheTTL: 60 * 60 * 1000, // 1 hour
+  temperature: 0.7,
+  verbose: false,
+  confidenceThreshold: 0.8
+};
+
+const contextConfig: ContextManagerConfig = {
+  storage: {
+    type: 'deno-kv',
+    kvPath: undefined // Use default KV path
+  },
+  limits: {
+    maxConversationAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    maxMessagesPerChat: 100,
+    maxStorageSize: 1024 * 1024 * 1024 // 1GB
+  },
+  cleanup: {
+    enabled: true,
+    interval: 60 * 60 * 1000, // 1 hour
+    batchSize: 10
+  }
+};
+
+const responseGeneratorConfig: ResponseGeneratorConfig = {
+  maxResponseLength: 4000,
+  enableMarkdown: true,
+  temperature: 0.7,
+  maxButtonsPerRow: 3,
+  maxRows: 10
+};
+
+// Create context storage
+const contextStorage = new KVContextStorage();
+await contextStorage.initialize();
+
+// Create component instances
+const telegramAdapter = new TelegramInterfaceAdapter(telegramConfig);
+
+const messagePreProcessor = new MessagePreProcessor(
+  llmServiceAdapter,
+  messagePreProcessorConfig
+);
+
+const decisionEngine = new DecisionEngine({
+  maxStateRetention: 1000,
+  defaultTimeout: 30000,
+  enableStatePersistence: true,
+  debugMode: false
+});
+
+const contextManager = new ContextManager(
+  contextConfig,
+  contextStorage
+);
+
+const responseGenerator = new ResponseGenerator(
+  llmService,
+  responseGeneratorConfig
+);
+
+const errorHandler = new SimpleErrorHandler();
+
+// Initialize error handler first
+await errorHandler.initialize();
+
+// Initialize all components
+await telegramAdapter.initialize();
+await messagePreProcessor.initialize();
+await decisionEngine.initialize();
+await contextManager.initialize();
+await responseGenerator.initialize();
+
+// Create system orchestrator configuration
+const orchestratorConfig: SystemOrchestratorConfig = {
+  telegramConfig: {
+    botToken: config.botToken,
+    webhookSecret: config.webhookSecret
+  },
+  enableMCPTools: true,
+  enableSelfModeration: true,
+  enableErrorRecovery: true,
+  requestTimeout: 30000,
+  maxRetries: 3,
+  logLevel: 'info'
+};
+
+// Create component dependencies
+const componentDependencies: ComponentDependencies = {
+  telegramAdapter,
+  messagePreProcessor,
+  decisionEngine,
+  contextManager,
+  responseGenerator,
+  errorHandler
+};
+
+// Initialize the system orchestrator with dependencies
+const orchestrator = new SystemOrchestrator(componentDependencies);
+await orchestrator.initialize(orchestratorConfig);
+
+console.log("System Orchestrator initialized successfully");
+
+// Subscribe to critical events
+eventBus.on(SystemEventType.ERROR_OCCURRED, (event) => {
+  console.error(`System error from ${event.source}:`, event);
+});
+
+eventBus.on(SystemEventType.COMPONENT_ERROR, (event) => {
+  console.error(`Component error from ${event.source}:`, event);
+});
+
+eventBus.on(SystemEventType.SYSTEM_READY, (event) => {
+  console.log('System is ready to process messages');
+});
 
 Deno.serve({
   port: 8000,
@@ -223,9 +375,9 @@ Deno.serve({
         console.log(`Processing new update: ${update.update_id}`);
       }
 
-      // Process the update asynchronously (don't await)
+      // Process the update asynchronously through the orchestrator
       // This allows us to return 200 OK immediately
-      processUpdateAsync(bodyText);
+      processUpdateAsync(update);
 
       // Return 200 OK immediately to acknowledge webhook
       return new Response("OK", { status: 200 });
@@ -241,17 +393,10 @@ Deno.serve({
 });
 
 // Async function to process updates in the background
-async function processUpdateAsync(bodyText: string) {
+async function processUpdateAsync(update: any) {
   try {
-    // Create a new request object with the body for grammy
-    const fakeRequest = new Request("https://telegram.org", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: bodyText,
-    });
-
-    // Let grammy handle the update
-    await handleUpdate(fakeRequest);
+    // Let the orchestrator handle the update
+    await orchestrator.handleUpdate(update);
   } catch (error) {
     console.error("Error processing update asynchronously:", error);
   }

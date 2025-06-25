@@ -17,6 +17,7 @@ export interface ModerationResult {
   suggestions?: string[];
   confidence: number;
   moderationTime?: number;
+  moderatedResponse?: GeneratedResponse; // Response modified by moderation
 }
 
 /**
@@ -55,6 +56,9 @@ export enum ModerationIssueType {
   INCOHERENT_RESPONSE = 'incoherent_response',
   CONTRADICTORY_INFORMATION = 'contradictory_information',
   INCOMPLETE_RESPONSE = 'incomplete_response',
+
+  // Completeness issues
+  MISSING_REQUIRED_ELEMENTS = 'missing_required_elements',
 
   // Tool integration issues
   TOOL_RESULTS_NOT_INTEGRATED = 'tool_results_not_integrated',

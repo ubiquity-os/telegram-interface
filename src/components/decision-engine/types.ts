@@ -64,6 +64,7 @@ export interface DecisionEngineConfig {
   defaultTimeout: number; // Default timeout for operations
   enableStatePersistence: boolean; // Whether to persist state
   debugMode: boolean; // Enable debug logging
+  confidenceThreshold: number; // Minimum confidence for decision making
 }
 
 /**

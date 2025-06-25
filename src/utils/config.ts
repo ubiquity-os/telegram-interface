@@ -9,7 +9,7 @@ interface Config {
 }
 
 export async function getConfig(): Promise<Config> {
-  // Bun automatically loads .env files, so we can access them via Deno.env.get()
+  // Deno automatically loads .env files in development
   // Determine bot type - defaults to production for backward compatibility
   const botType = (Deno.env.get("BOT_TYPE") || "production") as "production" | "preview";
 

@@ -5,9 +5,11 @@
  */
 
 import { IComponent, ComponentStatus } from '../../interfaces/component-interfaces.ts';
-import { GeneratedResponse } from '../../interfaces/message-types.ts';
+import { GeneratedResponse, InternalMessage, MessageAnalysis } from '../../interfaces/message-types.ts';
 import { ResponseContext } from '../../interfaces/component-interfaces.ts';
 import { ToolResult } from '../mcp-tool-manager/types.ts';
+import { EventBus } from '../../services/event-bus/event-bus.ts';
+import { SystemEventType } from '../../services/event-bus/types.ts';
 import {
   ISelfModerationEngine,
   ModerationResult,
@@ -20,29 +22,26 @@ import {
   ModerationMetrics
 } from './types.ts';
 
+// Import rule modules
+import { contentRules, sanitizeContent } from './rules/content-rules.ts';
+import { qualityRules, improveResponseQuality } from './rules/quality-rules.ts';
+import { safetyRules, makeSafeResponse } from './rules/safety-rules.ts';
+import { toolRules } from './rules/tool-rules.ts';
+
 /**
  * Default moderation configuration
  */
 const DEFAULT_CONFIG: ModerationConfig = {
-  confidenceThreshold: 0.5, // Lowered to be less strict for clean content
+  confidenceThreshold: 0.7,
   severityThreshold: 'medium',
   contentPolicy: {
     allowPersonalInfo: false,
     allowExternalLinks: true,
     allowCodeExecution: false,
     maxResponseLength: 4000,
-    requiredTone: undefined,
-    prohibitedPatterns: [
-      '(?i)(hack|crack|exploit)',
-      '(?i)(bomb|weapon|violence)',
-      '(?i)(password|secret|private)',
-    ],
-    sensitiveTopics: [
-      'personal_data',
-      'financial_info',
-      'medical_advice',
-      'legal_advice'
-    ]
+    requiredTone: 'formal',
+    prohibitedPatterns: [],
+    sensitiveTopics: []
   },
   enableContentFiltering: true,
   enableToneValidation: true,
@@ -57,6 +56,7 @@ const DEFAULT_CONFIG: ModerationConfig = {
 export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
   public readonly name = 'SelfModerationEngine';
   private logger = console;
+  private eventBus?: EventBus;
 
   private config: ModerationConfig = DEFAULT_CONFIG;
   private metrics: ModerationMetrics = {
@@ -79,7 +79,7 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
    */
   async initialize(): Promise<void> {
     this.isInitialized = true;
-    console.log('Self-Moderation Engine initialized');
+    this.logger.log('Self-Moderation Engine initialized');
   }
 
   /**
@@ -88,6 +88,13 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
   async initializeWithConfig(config: ModerationConfig): Promise<void> {
     this.config = { ...DEFAULT_CONFIG, ...config };
     await this.initialize();
+  }
+
+  /**
+   * Set event bus for event emissions
+   */
+  setEventBus(eventBus: EventBus): void {
+    this.eventBus = eventBus;
   }
 
   /**
@@ -102,75 +109,85 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
    */
   async moderateResponse(response: GeneratedResponse, context: ResponseContext): Promise<ModerationResult> {
     const startTime = Date.now();
+    const requestId = response.metadata?.messageId || `mod-${Date.now()}`;
+
+    // Emit moderation started event
+    this.eventBus?.emit({
+      id: `moderation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: SystemEventType.MODERATION_STARTED,
+      timestamp: new Date(),
+      source: 'SelfModerationEngine',
+      payload: {
+        response,
+        requestId
+      }
+    });
 
     try {
-      const issues: ModerationIssue[] = [];
+      const allIssues: ModerationIssue[] = [];
+      let moderatedResponse: GeneratedResponse | undefined;
+      let confidence = 1.0;
 
-      // Start with high confidence for clean content
-      let confidence = 0.95;
-
-      // Content validation
+      // Apply content rules
       if (this.config.enableContentFiltering) {
-        const contentResult = await this.validateContent(response.content);
-        issues.push(...(contentResult.issues || []));
-        // Only reduce confidence if there are actual issues
-        if (contentResult.issues && contentResult.issues.length > 0) {
-          confidence = Math.min(confidence, contentResult.confidence);
+        for (const rule of contentRules) {
+          if (rule.enabled) {
+            const issues = await rule.check(response.content);
+            if (issues.length > 0) {
+              allIssues.push(...issues);
+              confidence = Math.min(confidence, 0.8);
+            }
+          }
         }
       }
 
-      // Format validation
-      const formatResult = await this.validateFormat(response);
-      issues.push(...(formatResult.issues || []));
-      // Only reduce confidence if there are actual issues
-      if (formatResult.issues && formatResult.issues.length > 0) {
-        confidence = Math.min(confidence, formatResult.confidence);
-      }
-
-      // Tone validation
-      if (this.config.enableToneValidation && this.config.contentPolicy.requiredTone) {
-        const toneResult = await this.validateTone(response.content, this.config.contentPolicy.requiredTone);
-        issues.push(...(toneResult.issues || []));
-        // Only reduce confidence if there are actual issues
-        if (toneResult.issues && toneResult.issues.length > 0) {
-          confidence = Math.min(confidence, toneResult.confidence);
+      // Apply quality rules
+      for (const rule of qualityRules) {
+        if (rule.enabled) {
+          const issues = await rule.check(response, context);
+          if (issues.length > 0) {
+            allIssues.push(...issues);
+            confidence = Math.min(confidence, 0.85);
+          }
         }
       }
 
-      // Tool integration validation
+      // Apply safety rules
+      for (const rule of safetyRules) {
+        if (rule.enabled) {
+          const issues = await rule.check(response, context);
+          if (issues.length > 0) {
+            allIssues.push(...issues);
+            confidence = Math.min(confidence, 0.7);
+          }
+        }
+      }
+
+      // Apply tool rules
       if (this.config.enableToolIntegrationCheck && context.toolResults?.length) {
-        const toolIntegrated = await this.validateToolIntegration(response.content, context.toolResults);
-        if (!toolIntegrated) {
-          issues.push({
-            type: ModerationIssueType.TOOL_RESULTS_NOT_INTEGRATED,
-            severity: 'high',
-            description: 'Tool results are not properly integrated into the response'
-          });
-          confidence = Math.min(confidence, 0.5);
+        for (const rule of toolRules) {
+          if (rule.enabled) {
+            const issues = await rule.check(response, context);
+            if (issues.length > 0) {
+              allIssues.push(...issues);
+              confidence = Math.min(confidence, 0.75);
+            }
+          }
         }
       }
 
-      // Relevance check
-      if (this.config.enableRelevanceCheck) {
-        const relevanceResult = await this.validateRelevance(response.content, context);
-        issues.push(...(relevanceResult.issues || []));
-        // Only reduce confidence if there are actual issues
-        if (relevanceResult.issues && relevanceResult.issues.length > 0) {
-          confidence = Math.min(confidence, relevanceResult.confidence);
-        }
-      }
-
-      // Determine approval
-      const highSeverityIssues = issues.filter(issue => issue.severity === 'high');
-      const mediumSeverityIssues = issues.filter(issue => issue.severity === 'medium');
+      // Determine approval based on severity and confidence
+      const highSeverityIssues = allIssues.filter(issue => issue.severity === 'high');
+      const mediumSeverityIssues = allIssues.filter(issue => issue.severity === 'medium');
 
       let approved = true;
 
       if (this.config.severityThreshold === 'high' && highSeverityIssues.length > 0) {
         approved = false;
-      } else if (this.config.severityThreshold === 'medium' && (highSeverityIssues.length > 0 || mediumSeverityIssues.length > 0)) {
+      } else if (this.config.severityThreshold === 'medium' &&
+                 (highSeverityIssues.length > 0 || mediumSeverityIssues.length > 0)) {
         approved = false;
-      } else if (this.config.severityThreshold === 'low' && issues.length > 0) {
+      } else if (this.config.severityThreshold === 'low' && allIssues.length > 0) {
         approved = false;
       }
 
@@ -178,33 +195,94 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
         approved = false;
       }
 
-      const moderationTime = Math.max(1, Date.now() - startTime); // Ensure minimum 1ms for tests
+      // Apply modifications if needed
+      if (!approved && allIssues.length > 0) {
+        moderatedResponse = await this.createModeratedResponse(response, allIssues, context);
+      }
+
+      const moderationTime = Date.now() - startTime;
 
       // Update metrics
-      this.updateMetrics(approved, moderationTime, confidence, issues);
+      this.updateMetrics(approved, moderationTime, confidence, allIssues);
 
       const result: ModerationResult = {
         approved,
-        issues: issues.length > 0 ? issues : undefined,
-        suggestions: issues.length > 0 ? this.suggestImprovements(issues) : undefined,
+        issues: allIssues.length > 0 ? allIssues : undefined,
+        suggestions: allIssues.length > 0 ? this.suggestImprovements(allIssues) : undefined,
         confidence,
-        moderationTime
+        moderationTime,
+        moderatedResponse
       };
+
+      // Emit appropriate event based on result
+      if (approved) {
+        this.eventBus?.emit({
+          id: `moderation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          type: SystemEventType.MODERATION_APPROVED,
+          timestamp: new Date(),
+          source: 'SelfModerationEngine',
+          payload: {
+            response: result.moderatedResponse || response,
+            confidence: result.confidence,
+            requestId
+          }
+        });
+      } else {
+        this.eventBus?.emit({
+          id: `moderation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          type: SystemEventType.MODERATION_REJECTED,
+          timestamp: new Date(),
+          source: 'SelfModerationEngine',
+          payload: {
+            response,
+            reasons: allIssues,
+            requestId
+          }
+        });
+      }
+
+      if (moderatedResponse) {
+        this.eventBus?.emit({
+          id: `moderation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          type: SystemEventType.MODERATION_MODIFIED,
+          timestamp: new Date(),
+          source: 'SelfModerationEngine',
+          payload: {
+            originalResponse: response,
+            modifiedResponse: moderatedResponse,
+            requestId
+          }
+        });
+      }
 
       return result;
 
     } catch (error) {
-      console.error('Moderation error:', error);
-      const moderationTime = Math.max(1, Date.now() - startTime);
+      this.logger.error('Moderation error:', error);
+      const moderationTime = Date.now() - startTime;
       this.updateMetrics(false, moderationTime, 0, []);
+
+      const errorIssue: ModerationIssue = {
+        type: ModerationIssueType.INCOHERENT_RESPONSE,
+        severity: 'high',
+        description: `Moderation failed: ${error instanceof Error ? error.message : String(error)}`
+      };
+
+      this.eventBus?.emit({
+        id: `moderation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: SystemEventType.MODERATION_FAILED,
+        timestamp: new Date(),
+        source: 'SelfModerationEngine',
+        payload: {
+          response,
+          error: error instanceof Error ? error : new Error(String(error)),
+          requestId
+        }
+      });
 
       return {
         approved: false,
-        issues: [{
-          type: ModerationIssueType.INCOHERENT_RESPONSE,
-          severity: 'high',
-          description: `Moderation failed: ${error instanceof Error ? error.message : String(error)}`
-        }],
+        issues: [errorIssue],
         confidence: 0,
         moderationTime
       };
@@ -212,107 +290,127 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
   }
 
   /**
-   * Validate tool integration
+   * Create a moderated response based on issues found
+   */
+  private async createModeratedResponse(
+    response: GeneratedResponse,
+    issues: ModerationIssue[],
+    context: ResponseContext
+  ): Promise<GeneratedResponse> {
+    let modifiedResponse = response;
+
+    // Apply content sanitization for inappropriate content
+    if (issues.some(i => i.type === ModerationIssueType.INAPPROPRIATE_CONTENT)) {
+      modifiedResponse = {
+        ...modifiedResponse,
+        content: sanitizeContent(modifiedResponse.content)
+      };
+    }
+
+    // Apply safety modifications
+    const safetyIssues = issues.filter(i => i.type === ModerationIssueType.UNSAFE_CONTENT);
+    if (safetyIssues.length > 0) {
+      modifiedResponse = makeSafeResponse(modifiedResponse, safetyIssues, context);
+    }
+
+    // Apply quality improvements
+    if (issues.some(i => [
+      ModerationIssueType.INCOMPLETE_RESPONSE,
+      ModerationIssueType.INCOHERENT_RESPONSE,
+      ModerationIssueType.BROKEN_MARKUP
+    ].includes(i.type))) {
+      modifiedResponse = improveResponseQuality(modifiedResponse);
+    }
+
+    // Handle tool integration issues
+    if (issues.some(i => i.type === ModerationIssueType.TOOL_RESULTS_NOT_INTEGRATED) && context.toolResults) {
+      // Add a note about tool results if they're missing
+      const toolNote = '\n\nBased on the tools used, here are the results:\n' +
+        context.toolResults
+          .filter(r => r.success)
+          .map(r => `- ${r.toolId}: ${JSON.stringify(r.output)}`)
+          .join('\n');
+      modifiedResponse = {
+        ...modifiedResponse,
+        content: modifiedResponse.content + toolNote
+      };
+    }
+
+    return {
+      ...modifiedResponse,
+      metadata: {
+        ...modifiedResponse.metadata,
+        moderated: true,
+        moderationIssues: issues.map(i => i.type)
+      }
+    };
+  }
+
+  /**
+   * Validate tool integration (legacy method)
    */
   async validateToolIntegration(response: string, toolResults: ToolResult[]): Promise<boolean> {
     if (toolResults.length === 0) return true;
 
-    // Check if response references tool results
-    const successfulResults = toolResults.filter(result => result.success);
+    const dummyResponse: GeneratedResponse = { content: response, metadata: {} };
+    const context: ResponseContext = {
+      originalMessage: '',
+      analysis: {} as MessageAnalysis,
+      conversationHistory: [],
+      constraints: {
+        maxLength: 4000,
+        allowMarkdown: true,
+        requireInlineKeyboard: false
+      },
+      toolResults
+    };
 
-    // If no successful results, don't penalize for not integrating failed results
-    if (successfulResults.length === 0) return true;
-
-    // Enhanced heuristic: check if response contains content from tool outputs
-    for (const result of successfulResults) {
-      if (result.output && typeof result.output === 'string') {
-        // Check for direct text overlap (case insensitive)
-        const outputLower = result.output.toLowerCase();
-        const responseLower = response.toLowerCase();
-
-        // Look for substantial phrases (3+ words) from tool output in response
-        const outputWords = outputLower.split(/\s+/);
-        for (let i = 0; i <= outputWords.length - 3; i++) {
-          const phrase = outputWords.slice(i, i + 3).join(' ');
-          if (phrase.length > 8 && responseLower.includes(phrase)) {
-            return true;
-          }
-        }
-
-        // Also check for overlap in key terms
-        const outputTerms = this.extractKeyTerms(result.output);
-        const responseTerms = this.extractKeyTerms(response);
-        const overlap = outputTerms.filter(term => responseTerms.includes(term));
-
-        // Require at least 2 overlapping terms for integration
-        if (overlap.length >= 2) {
-          return true;
+    // Check all tool rules
+    for (const rule of toolRules) {
+      if (rule.enabled) {
+        const issues = await rule.check(dummyResponse, context);
+        if (issues.length > 0) {
+          return false;
         }
       }
     }
 
-    return false;
+    return true;
   }
 
   /**
-   * Validate content against policies
+   * Validate content (legacy method)
    */
   async validateContent(content: string): Promise<ModerationResult> {
     const issues: ModerationIssue[] = [];
+    let confidence = 1.0;
 
-    // Check prohibited patterns
-    for (const pattern of this.config.contentPolicy.prohibitedPatterns) {
-      const regex = new RegExp(pattern);
-      if (regex.test(content)) {
-        issues.push({
-          type: ModerationIssueType.INAPPROPRIATE_CONTENT,
-          severity: 'high',
-          description: `Content matches prohibited pattern: ${pattern}`
-        });
-      }
-    }
-
-    // Check length
-    if (content.length > this.config.contentPolicy.maxResponseLength) {
-      issues.push({
-        type: ModerationIssueType.EXCESSIVE_LENGTH,
-        severity: 'medium',
-        description: `Response exceeds maximum length: ${content.length}/${this.config.contentPolicy.maxResponseLength}`
-      });
-    }
-
-    // Check for sensitive topics (basic keyword matching)
-    for (const topic of this.config.contentPolicy.sensitiveTopics) {
-      if (content.toLowerCase().includes(topic.toLowerCase().replace('_', ' '))) {
-        issues.push({
-          type: ModerationIssueType.UNSAFE_CONTENT,
-          severity: 'medium',
-          description: `Content may contain sensitive topic: ${topic}`
-        });
+    // Apply all content rules
+    for (const rule of contentRules) {
+      if (rule.enabled) {
+        const ruleIssues = await rule.check(content);
+        if (ruleIssues.length > 0) {
+          issues.push(...ruleIssues);
+          confidence = Math.min(confidence, 0.8);
+        }
       }
     }
 
     return {
       approved: issues.length === 0,
       issues: issues.length > 0 ? issues : undefined,
-      confidence: issues.length === 0 ? 0.95 : Math.max(0.7, 1.0 - (issues.length * 0.2))
+      confidence
     };
   }
 
   /**
-   * Validate tone
+   * Validate tone (legacy method)
    */
   async validateTone(content: string, expectedTone?: string): Promise<ModerationResult> {
+    const analysis = await this.analyzeText(content);
     const issues: ModerationIssue[] = [];
 
-    if (!expectedTone) {
-      return { approved: true, confidence: 0.95 };
-    }
-
-    const analysis = await this.analyzeText(content);
-
-    // Only flag as issue if tone is definitively different (not unknown)
-    if (analysis.tone !== expectedTone && analysis.tone !== 'unknown') {
+    if (expectedTone && analysis.tone !== expectedTone && analysis.tone !== 'unknown') {
       issues.push({
         type: ModerationIssueType.INCOHERENT_RESPONSE,
         severity: 'medium',
@@ -323,33 +421,89 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
     return {
       approved: issues.length === 0,
       issues: issues.length > 0 ? issues : undefined,
-      confidence: issues.length === 0 ? 0.95 : (analysis.tone === expectedTone ? 0.95 : 0.8)
+      confidence: issues.length === 0 ? 0.95 : 0.7
     };
   }
 
   /**
-   * Validate format
+   * Validate format (legacy method)
    */
   async validateFormat(response: GeneratedResponse): Promise<ModerationResult> {
+    const context: ResponseContext = {
+      originalMessage: '',
+      analysis: {} as MessageAnalysis,
+      conversationHistory: [],
+      constraints: {
+        maxLength: 4000,
+        allowMarkdown: true,
+        requireInlineKeyboard: false
+      }
+    };
+
     const issues: ModerationIssue[] = [];
 
-    // Check for empty response
-    if (!response.content.trim()) {
-      issues.push({
-        type: ModerationIssueType.INCOMPLETE_RESPONSE,
-        severity: 'high',
-        description: 'Response is empty'
-      });
+    // Check format-related quality rules
+    for (const rule of qualityRules) {
+      if (rule.enabled && rule.name.toLowerCase().includes('format')) {
+        const ruleIssues = await rule.check(response, context);
+        issues.push(...ruleIssues);
+      }
     }
-
-    // Check for broken markdown (basic check)
-    const markdownErrors = this.validateMarkdown(response.content);
-    issues.push(...markdownErrors);
 
     return {
       approved: issues.length === 0,
       issues: issues.length > 0 ? issues : undefined,
-      confidence: issues.length === 0 ? 0.95 : Math.max(0.8, 1.0 - (issues.length * 0.15))
+      confidence: issues.length === 0 ? 0.95 : 0.8
+    };
+  }
+
+  /**
+   * Analyze text for sentiment, tone, etc.
+   */
+  async analyzeText(text: string): Promise<TextAnalysis> {
+    // Simple text analysis implementation
+    const wordCount = text.split(/\s+/).length;
+    const sentenceCount = text.split(/[.!?]+/).filter(s => s.trim()).length;
+    const avgWordsPerSentence = sentenceCount > 0 ? wordCount / sentenceCount : 0;
+
+    // Determine sentiment based on keywords
+    const positiveWords = ['great', 'excellent', 'good', 'happy', 'wonderful', 'amazing', 'thank'];
+    const negativeWords = ['bad', 'terrible', 'awful', 'hate', 'horrible', 'poor', 'wrong'];
+
+    const lowerText = text.toLowerCase();
+    const positiveCount = positiveWords.filter(word => lowerText.includes(word)).length;
+    const negativeCount = negativeWords.filter(word => lowerText.includes(word)).length;
+
+    let sentiment: 'positive' | 'negative' | 'neutral' = 'neutral';
+    if (positiveCount > negativeCount) sentiment = 'positive';
+    else if (negativeCount > positiveCount) sentiment = 'negative';
+
+    // Determine tone based on text characteristics
+    let tone: 'formal' | 'casual' | 'technical' | 'friendly' | 'unknown' = 'unknown';
+
+    if (text.includes('please') || text.includes('kindly') || avgWordsPerSentence > 15) {
+      tone = 'formal';
+    } else if (text.includes('hey') || text.includes('gonna') || text.includes('!')) {
+      tone = 'casual';
+    } else if (/\b(API|SDK|function|method|parameter|algorithm)\b/i.test(text)) {
+      tone = 'technical';
+    } else if (text.includes('😊') || text.includes('😄') || /\b(hi|hello|thanks)\b/i.test(text)) {
+      tone = 'friendly';
+    }
+
+    // Extract topics (simple keyword extraction)
+    const commonWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for']);
+    const words = text.toLowerCase().match(/\b\w+\b/g) || [];
+    const topics = words
+      .filter(word => word.length > 4 && !commonWords.has(word))
+      .slice(0, 5);
+
+    return {
+      sentiment,
+      tone,
+      topics,
+      entities: [], // Simple implementation doesn't extract entities
+      flags: []
     };
   }
 
@@ -357,23 +511,23 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
    * Check content policy
    */
   async checkContentPolicy(content: string, policy: ContentPolicy): Promise<ModerationResult> {
-    return this.validateContent(content);
+    // Store original config and temporarily apply the provided policy
+    const originalPolicy = this.config.contentPolicy;
+    this.config.contentPolicy = policy;
+
+    const result = await this.validateContent(content);
+
+    // Restore original policy
+    this.config.contentPolicy = originalPolicy;
+
+    return result;
   }
 
   /**
    * Sanitize content
    */
   sanitizeContent(content: string): string {
-    // Remove potential XSS patterns
-    let sanitized = content
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/javascript:/gi, '')
-      .replace(/on\w+\s*=/gi, '');
-
-    // Remove excessive whitespace
-    sanitized = sanitized.replace(/\s+/g, ' ').trim();
-
-    return sanitized;
+    return sanitizeContent(content);
   }
 
   /**
@@ -399,12 +553,32 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
         case ModerationIssueType.BROKEN_MARKUP:
           suggestions.push('Fix markdown formatting errors');
           break;
-        default:
-          suggestions.push('Review and improve the response quality');
+        case ModerationIssueType.UNSAFE_CONTENT:
+          suggestions.push('Remove potentially harmful content and provide safer alternatives');
+          break;
+        case ModerationIssueType.SPAM_CONTENT:
+          suggestions.push('Remove repetitive or promotional content');
+          break;
+        case ModerationIssueType.OFF_TOPIC:
+          suggestions.push('Focus on addressing the user\'s specific question or request');
+          break;
+        case ModerationIssueType.INCOHERENT_RESPONSE:
+          suggestions.push('Restructure the response for better clarity and coherence');
+          break;
+        case ModerationIssueType.CONTRADICTORY_INFORMATION:
+          suggestions.push('Resolve contradictions and provide consistent information');
+          break;
       }
     }
 
     return [...new Set(suggestions)]; // Remove duplicates
+  }
+
+  /**
+   * Get current configuration
+   */
+  getConfig(): ModerationConfig {
+    return { ...this.config };
   }
 
   /**
@@ -415,10 +589,10 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
   }
 
   /**
-   * Get current configuration
+   * Get moderation metrics
    */
-  getConfig(): ModerationConfig {
-    return { ...this.config };
+  getMetrics(): ModerationMetrics {
+    return { ...this.metrics };
   }
 
   /**
@@ -430,132 +604,21 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
       status: this.isInitialized ? 'healthy' : 'unhealthy',
       lastHealthCheck: new Date(),
       metadata: {
-        totalModerations: this.metrics.totalModerations,
-        approvalRate: this.metrics.approvalRate,
-        averageModerationTime: this.metrics.averageModerationTime
+        initialized: this.isInitialized,
+        message: this.isInitialized ? 'Self-Moderation Engine is operational' : 'Not initialized',
+        uptime: Date.now(),
+        metrics: {
+          totalModerations: this.metrics.totalModerations,
+          approvalRate: this.metrics.approvalRate,
+          averageConfidence: this.metrics.averageConfidence,
+          averageModerationTime: this.metrics.averageModerationTime
+        }
       }
     };
   }
 
   /**
-   * Get moderation metrics
-   */
-  getMetrics(): ModerationMetrics {
-    return { ...this.metrics };
-  }
-
-  /**
-   * Validate relevance to context
-   */
-  private async validateRelevance(response: string, context: ResponseContext): Promise<ModerationResult> {
-    const issues: ModerationIssue[] = [];
-
-    // Simple relevance check: ensure response relates to original message
-    const messageTerms = this.extractKeyTerms(context.originalMessage);
-    const responseTerms = this.extractKeyTerms(response);
-
-    // Be more lenient with relevance checking
-    const overlap = messageTerms.filter(term => responseTerms.includes(term));
-    const relevanceScore = messageTerms.length > 0 ? overlap.length / messageTerms.length : 1.0;
-
-    // Very low threshold for general conversational responses - only flag obviously irrelevant content
-    if (relevanceScore < 0.05 && messageTerms.length > 2) {
-      issues.push({
-        type: ModerationIssueType.IRRELEVANT_RESPONSE,
-        severity: 'medium',
-        description: `Response may not be relevant to the original message (relevance: ${(relevanceScore * 100).toFixed(1)}%)`
-      });
-    }
-
-    return {
-      approved: issues.length === 0,
-      issues: issues.length > 0 ? issues : undefined,
-      confidence: issues.length === 0 ? 0.95 : Math.max(0.7, relevanceScore)
-    };
-  }
-
-  /**
-   * Extract key terms from text
-   */
-  private extractKeyTerms(text: string): string[] {
-    return text
-      .toLowerCase()
-      .replace(/[^\w\s]/g, ' ')
-      .split(/\s+/)
-      .filter(word => word.length > 3)
-      .filter(word => !['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'her', 'was', 'one', 'our', 'had', 'but', 'words', 'with', 'they', 'have', 'this', 'will', 'from', 'that', 'what', 'were', 'said', 'each', 'which', 'their', 'time', 'about', 'would', 'there', 'could', 'other', 'more', 'very', 'into', 'after', 'first', 'well', 'water', 'been', 'call', 'who', 'its', 'now', 'find', 'long', 'down', 'day', 'did', 'get', 'has', 'him', 'his', 'how', 'man', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'boy', 'did', 'its', 'let', 'put', 'say', 'she', 'too', 'use'].includes(word));
-  }
-
-  /**
-   * Analyze text for sentiment, tone, etc.
-   */
-  private async analyzeText(text: string): Promise<TextAnalysis> {
-    // Simple rule-based analysis (in production, might use ML models)
-    const words = text.toLowerCase().split(/\s+/);
-
-    // Tone detection
-    let tone: TextAnalysis['tone'] = 'unknown';
-    if (words.some(word => ['please', 'thank', 'kindly', 'appreciate'].includes(word))) {
-      tone = 'formal';
-    } else if (words.some(word => ['hey', 'cool', 'awesome', 'great'].includes(word))) {
-      tone = 'casual';
-    } else if (words.some(word => ['function', 'algorithm', 'implementation', 'code'].includes(word))) {
-      tone = 'technical';
-    } else if (words.some(word => ['help', 'welcome', 'happy', 'glad'].includes(word))) {
-      tone = 'friendly';
-    }
-
-    // Sentiment detection
-    const positiveWords = words.filter(word => ['good', 'great', 'excellent', 'amazing', 'wonderful', 'perfect'].includes(word));
-    const negativeWords = words.filter(word => ['bad', 'terrible', 'awful', 'horrible', 'wrong', 'failed'].includes(word));
-
-    let sentiment: TextAnalysis['sentiment'] = 'neutral';
-    if (positiveWords.length > negativeWords.length) {
-      sentiment = 'positive';
-    } else if (negativeWords.length > positiveWords.length) {
-      sentiment = 'negative';
-    }
-
-    return {
-      sentiment,
-      tone,
-      topics: [], // Could be enhanced with topic extraction
-      entities: [], // Could be enhanced with NER
-      flags: []
-    };
-  }
-
-  /**
-   * Validate markdown formatting
-   */
-  private validateMarkdown(text: string): ModerationIssue[] {
-    const issues: ModerationIssue[] = [];
-
-    // Check for unmatched code blocks
-    const codeBlockMatches = text.match(/```/g);
-    if (codeBlockMatches && codeBlockMatches.length % 2 !== 0) {
-      issues.push({
-        type: ModerationIssueType.BROKEN_MARKUP,
-        severity: 'medium',
-        description: 'Unmatched code block markers (```)'
-      });
-    }
-
-    // Check for unmatched bold/italic
-    const boldMatches = text.match(/\*\*/g);
-    if (boldMatches && boldMatches.length % 2 !== 0) {
-      issues.push({
-        type: ModerationIssueType.BROKEN_MARKUP,
-        severity: 'medium',
-        description: 'Unmatched bold markers (**)'
-      });
-    }
-
-    return issues;
-  }
-
-  /**
-   * Update metrics
+   * Update internal metrics
    */
   private updateMetrics(
     approved: boolean,
@@ -564,18 +627,27 @@ export class SelfModerationEngine implements ISelfModerationEngine, IComponent {
     issues: ModerationIssue[]
   ): void {
     this.metrics.totalModerations++;
-    this._totalApprovals += approved ? 1 : 0;
+
+    if (approved) {
+      this._totalApprovals++;
+    }
+
     this._totalModerationTime += moderationTime;
     this._totalConfidence += confidence;
 
-    // Update calculated metrics
+    // Update approval rate
     this.metrics.approvalRate = this._totalApprovals / this.metrics.totalModerations;
+
+    // Update average moderation time
     this.metrics.averageModerationTime = this._totalModerationTime / this.metrics.totalModerations;
+
+    // Update average confidence
     this.metrics.averageConfidence = this._totalConfidence / this.metrics.totalModerations;
 
     // Update common issue types
     for (const issue of issues) {
-      this.metrics.commonIssueTypes[issue.type] = (this.metrics.commonIssueTypes[issue.type] || 0) + 1;
+      this.metrics.commonIssueTypes[issue.type] =
+        (this.metrics.commonIssueTypes[issue.type] || 0) + 1;
     }
   }
 }

@@ -158,7 +158,7 @@ export interface IMCPClient {
  */
 export interface IMCPToolManager {
   // Lifecycle
-  initialize(configs: MCPServerConfig[]): Promise<void>;
+  initializeWithConfigs(configs: MCPServerConfig[]): Promise<void>;
   shutdown(): Promise<void>;
 
   // Discovery

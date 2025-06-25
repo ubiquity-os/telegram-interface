@@ -316,6 +316,7 @@ export interface ResponseContext {
   toolResults?: ToolResult[];
   conversationHistory: InternalMessage[];
   constraints: ResponseConstraints;
+  moderationFeedback?: string;
 }
 
 export interface ResponseConstraints {

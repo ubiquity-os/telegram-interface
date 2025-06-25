@@ -28,6 +28,8 @@ import {
   EventType
 } from '../../interfaces/message-types.ts';
 
+import { createEventEmitter, SystemEventType } from '../../services/event-bus/index.ts';
+
 /**
  * Central orchestrator for request handling and decision flow
  */
@@ -40,6 +42,7 @@ export class DecisionEngine implements IDecisionEngine {
   private errorHandler?: IErrorHandler;
   private metrics: DecisionMetrics;
   private isInitialized = false;
+  private eventEmitter: ReturnType<typeof createEventEmitter>;
 
   constructor(config?: Partial<DecisionEngineConfig>) {
     this.config = {
@@ -47,6 +50,7 @@ export class DecisionEngine implements IDecisionEngine {
       defaultTimeout: 30000,
       enableStatePersistence: true,
       debugMode: false,
+      confidenceThreshold: 0.6,
       ...config
     };
 
@@ -58,6 +62,7 @@ export class DecisionEngine implements IDecisionEngine {
       errorRate: 0,
       stateDistribution: {} as Record<DecisionState, number>
     };
+    this.eventEmitter = createEventEmitter('DecisionEngine');
   }
 
   /**
@@ -75,6 +80,15 @@ export class DecisionEngine implements IDecisionEngine {
     this.resetMetrics();
 
     this.isInitialized = true;
+
+    // Emit initialization event
+    await this.eventEmitter.emit({
+      type: SystemEventType.COMPONENT_INITIALIZED,
+      payload: {
+        componentName: this.name,
+        timestamp: new Date()
+      }
+    });
 
     if (this.config.debugMode) {
       console.log('[DecisionEngine] Initialized successfully');
@@ -140,6 +154,7 @@ export class DecisionEngine implements IDecisionEngine {
       // Update metrics
       this.metrics.totalDecisions++;
 
+
       // Transition to MESSAGE_RECEIVED state
       this.stateMachine.transition(chatId, DecisionEvent.MESSAGE_RECEIVED, {
         messageId: context.message.messageId,
@@ -172,6 +187,16 @@ export class DecisionEngine implements IDecisionEngine {
         this.metrics.toolUsageRate = this.calculateToolUsageRate();
       }
 
+      // Emit decision made event
+      await this.eventEmitter.emit({
+        type: SystemEventType.DECISION_MADE,
+        payload: {
+          message: context.message,
+          decision,
+          requestId: context.message.messageId.toString()
+        }
+      });
+
       return decision;
 
     } catch (error) {
@@ -181,6 +206,20 @@ export class DecisionEngine implements IDecisionEngine {
       });
 
       this.metrics.errorRate = this.calculateErrorRate();
+
+      // Emit component error event
+      await this.eventEmitter.emit({
+        type: SystemEventType.COMPONENT_ERROR,
+        payload: {
+          componentName: this.name,
+          error: error as Error
+        },
+        metadata: {
+          operation: 'makeDecision',
+          chatId,
+          messageId: context.message.messageId
+        }
+      });
 
       if (this.errorHandler) {
         const errorResult = await this.errorHandler.handleError(error as Error, {
@@ -335,33 +374,297 @@ export class DecisionEngine implements IDecisionEngine {
    * Analyze context and make decision
    */
   private async analyzeAndDecide(context: DecisionContext): Promise<Decision> {
-    const { analysis, availableTools } = context;
+    const { analysis, availableTools, conversationState } = context;
+    const chatId = context.message.chatId;
 
-    // Simple decision logic for Phase 2 (no MCP integration yet)
+    // Extract tool names from ToolDefinition[]
+    const availableToolNames = availableTools.map(tool => tool.name);
 
-    // If analysis suggests tools are needed and tools are available
-    if (analysis.suggestedTools && analysis.suggestedTools.length > 0 && availableTools.length > 0) {
-      // For Phase 2, we'll not actually execute tools - just indicate they're needed
+    // Log decision process in debug mode
+    if (this.config.debugMode) {
+      console.log('[DecisionEngine] Making decision:', {
+        intent: analysis.intent,
+        confidence: analysis.confidence,
+        suggestedTools: analysis.suggestedTools,
+        availableTools: availableToolNames
+      });
+    }
+
+    // Check confidence threshold first
+    if (analysis.confidence < this.config.confidenceThreshold) {
+      return this.createClarificationDecision(analysis);
+    }
+
+    // Transition to DECISION_POINT state
+    this.stateMachine.transition(chatId, DecisionEvent.ANALYSIS_COMPLETE);
+
+    // Apply decision rules based on intent
+    switch (analysis.intent) {
+      case 'tool_request':
+        return this.handleToolRequestIntent(context, analysis, availableToolNames, chatId);
+
+      case 'command':
+        return this.handleCommandIntent(analysis, availableToolNames, chatId);
+
+      case 'question':
+        return this.handleQuestionIntent(analysis, availableToolNames, chatId);
+
+      case 'conversation':
+        return this.handleConversationIntent(analysis, chatId);
+
+      default:
+        // Fallback for unknown intents
+        return this.createDirectResponseDecision(analysis, 'casual');
+    }
+  }
+
+  /**
+   * Handle tool_request intent
+   */
+  private async handleToolRequestIntent(
+    context: DecisionContext,
+    analysis: MessageAnalysis,
+    availableTools: string[],
+    chatId: number
+  ): Promise<Decision> {
+    // Check if suggested tools are available
+    const matchingTools = this.findMatchingTools(analysis.suggestedTools || [], availableTools);
+
+    if (matchingTools.length > 0) {
+      this.stateMachine.transition(chatId, DecisionEvent.TOOLS_REQUIRED, {
+        toolCount: matchingTools.length
+      });
+
+      // Emit decision made event for tool execution
+      await this.eventEmitter.emit({
+        type: SystemEventType.DECISION_MADE,
+        payload: {
+          message: context.message,
+          decision: {
+            action: 'execute_tools',
+            toolCalls: matchingTools.map(toolId => ({
+              toolId,
+              serverId: 'default',
+              arguments: {}
+            })),
+            metadata: {}
+          } as Decision,
+          requestId: context.message.messageId.toString()
+        }
+      });
+
       return {
         action: 'execute_tools',
-        toolCalls: [], // Empty for Phase 2
+        toolCalls: matchingTools.map(toolId => ({
+          toolId,
+          serverId: 'default', // Will be determined by MCP integration
+          arguments: {} // Will be populated by tool executor
+        })),
         responseStrategy: {
           type: 'tool_based',
-          tone: 'technical'
+          tone: 'technical',
+          includeKeyboard: true
         },
         metadata: {
-          suggestedTools: analysis.suggestedTools,
-          phase: 'phase_2_placeholder'
+          intent: analysis.intent,
+          confidence: analysis.confidence,
+          suggestedTools: matchingTools
         }
       };
     }
 
-    // Default to direct response
+    // No matching tools found - respond with available options
+    this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
     return {
       action: 'respond',
       responseStrategy: {
         type: 'direct',
-        tone: this.determineTone(analysis),
+        tone: 'formal',
+        includeKeyboard: true
+      },
+      metadata: {
+        intent: analysis.intent,
+        confidence: analysis.confidence,
+        message: 'No matching tools found for your request',
+        availableTools
+      }
+    };
+  }
+
+  /**
+   * Handle command intent
+   */
+  private async handleCommandIntent(
+    analysis: MessageAnalysis,
+    availableTools: string[],
+    chatId: number
+  ): Promise<Decision> {
+    // Commands might require tools
+    if (analysis.suggestedTools && analysis.suggestedTools.length > 0) {
+      const matchingTools = this.findMatchingTools(analysis.suggestedTools, availableTools);
+
+      if (matchingTools.length > 0) {
+        this.stateMachine.transition(chatId, DecisionEvent.TOOLS_REQUIRED, {
+          toolCount: matchingTools.length
+        });
+
+        return {
+          action: 'execute_tools',
+          toolCalls: matchingTools.map(toolId => ({
+            toolId,
+            serverId: 'default',
+            arguments: {}
+          })),
+          responseStrategy: {
+            type: 'tool_based',
+            tone: 'technical',
+            includeKeyboard: false
+          },
+          metadata: {
+            intent: analysis.intent,
+            confidence: analysis.confidence
+          }
+        };
+      }
+    }
+
+    // Direct command execution without tools
+    this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+    return {
+      action: 'respond',
+      responseStrategy: {
+        type: 'direct',
+        tone: 'technical',
+        includeKeyboard: true
+      },
+      metadata: {
+        intent: analysis.intent,
+        confidence: analysis.confidence,
+        command: analysis.entities?.command || 'unknown'
+      }
+    };
+  }
+
+  /**
+   * Handle question intent
+   */
+  private async handleQuestionIntent(
+    analysis: MessageAnalysis,
+    availableTools: string[],
+    chatId: number
+  ): Promise<Decision> {
+    // Check if question requires tools (e.g., data lookup, calculations)
+    if (analysis.suggestedTools && analysis.suggestedTools.length > 0) {
+      const relevance = this.calculateToolRelevance(analysis);
+
+      if (relevance > 0.7) { // High tool relevance threshold
+        const matchingTools = this.findMatchingTools(analysis.suggestedTools, availableTools);
+
+        if (matchingTools.length > 0) {
+          this.stateMachine.transition(chatId, DecisionEvent.TOOLS_REQUIRED, {
+            toolCount: matchingTools.length,
+            relevance
+          });
+
+          return {
+            action: 'execute_tools',
+            toolCalls: matchingTools.map(toolId => ({
+              toolId,
+              serverId: 'default',
+              arguments: {}
+            })),
+            responseStrategy: {
+              type: 'tool_based',
+              tone: 'formal',
+              includeKeyboard: false
+            },
+            metadata: {
+              intent: analysis.intent,
+              confidence: analysis.confidence,
+              toolRelevance: relevance
+            }
+          };
+        }
+      }
+    }
+
+    // Answer question directly
+    this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+    return {
+      action: 'respond',
+      responseStrategy: {
+        type: 'direct',
+        tone: analysis.requiresContext ? 'formal' : 'casual',
+        includeKeyboard: false
+      },
+      metadata: {
+        intent: analysis.intent,
+        confidence: analysis.confidence,
+        requiresContext: analysis.requiresContext
+      }
+    };
+  }
+
+  /**
+   * Handle conversation intent
+   */
+  private async handleConversationIntent(
+    analysis: MessageAnalysis,
+    chatId: number
+  ): Promise<Decision> {
+    this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+
+    return {
+      action: 'respond',
+      responseStrategy: {
+        type: 'direct',
+        tone: 'casual',
+        includeKeyboard: false
+      },
+      metadata: {
+        intent: analysis.intent,
+        confidence: analysis.confidence,
+        contextual: analysis.requiresContext
+      }
+    };
+  }
+
+  /**
+   * Create clarification decision for low confidence
+   */
+  private createClarificationDecision(analysis: MessageAnalysis): Decision {
+    return {
+      action: 'ask_clarification',
+      responseStrategy: {
+        type: 'clarification',
+        tone: 'formal',
+        includeKeyboard: true
+      },
+      metadata: {
+        originalIntent: analysis.intent,
+        confidence: analysis.confidence,
+        reason: 'low_confidence',
+        suggestedQuestions: [
+          'Could you please rephrase your request?',
+          'What would you like me to help you with?',
+          'Can you provide more details?'
+        ]
+      }
+    };
+  }
+
+  /**
+   * Create direct response decision
+   */
+  private createDirectResponseDecision(
+    analysis: MessageAnalysis,
+    tone: 'formal' | 'casual' | 'technical'
+  ): Decision {
+    return {
+      action: 'respond',
+      responseStrategy: {
+        type: 'direct',
+        tone,
         includeKeyboard: this.shouldIncludeKeyboard(analysis)
       },
       metadata: {
@@ -369,6 +672,31 @@ export class DecisionEngine implements IDecisionEngine {
         confidence: analysis.confidence
       }
     };
+  }
+
+  /**
+   * Find matching tools between suggested and available
+   */
+  private findMatchingTools(suggested: string[], available: string[]): string[] {
+    if (!suggested || suggested.length === 0) return [];
+
+    return suggested.filter(tool => available.includes(tool));
+  }
+
+  /**
+   * Calculate tool relevance based on analysis
+   */
+  private calculateToolRelevance(analysis: MessageAnalysis): number {
+    // Base relevance on confidence and number of suggested tools
+    let relevance = analysis.confidence;
+
+    if (analysis.suggestedTools && analysis.suggestedTools.length > 0) {
+      // Increase relevance based on number of suggested tools
+      relevance *= (1 + (analysis.suggestedTools.length * 0.1));
+    }
+
+    // Cap at 1.0
+    return Math.min(relevance, 1.0);
   }
 
   /**

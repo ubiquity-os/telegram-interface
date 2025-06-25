@@ -6,14 +6,11 @@ import { Bot } from "grammy";
 import {
   ITelegramInterfaceAdapter,
   TelegramUpdate,
-  ComponentStatus,
-  IEventEmitter
+  ComponentStatus
 } from '../../interfaces/component-interfaces.ts';
 import {
   TelegramMessage,
-  TelegramResponse,
-  EventType,
-  SystemEvent
+  TelegramResponse
 } from '../../interfaces/message-types.ts';
 import {
   TelegramInterfaceAdapterConfig,
@@ -21,20 +18,23 @@ import {
   RateLimitState,
   DeduplicationEntry
 } from './types.ts';
+import { createEventEmitter, SystemEventType } from '../../services/event-bus/index.ts';
 
 export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
+  public readonly name = 'TelegramInterfaceAdapter';
+
   private bot: Bot | null = null;
   private config: TelegramInterfaceAdapterConfig;
   private messageQueue: QueuedMessage[] = [];
   private rateLimitState: RateLimitState;
   private deduplicationCache: Map<number, DeduplicationEntry> = new Map();
   private processingInterval: number | null = null;
-  private eventEmitter: IEventEmitter | null = null;
+  private eventEmitter: ReturnType<typeof createEventEmitter>;
   private isInitialized = false;
 
-  constructor(config: TelegramInterfaceAdapterConfig, eventEmitter?: IEventEmitter) {
+  constructor(config: TelegramInterfaceAdapterConfig) {
     this.config = config;
-    this.eventEmitter = eventEmitter || null;
+    this.eventEmitter = createEventEmitter('TelegramInterfaceAdapter');
 
     // Initialize rate limit state
     const now = new Date();
@@ -65,18 +65,22 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
 
       this.isInitialized = true;
 
-      this.emitEvent({
-        type: EventType.COMPONENT_READY,
-        source: 'TelegramInterfaceAdapter',
-        timestamp: new Date(),
-        data: { status: 'initialized' }
+      // Emit component initialized event
+      await this.eventEmitter.emit({
+        type: SystemEventType.COMPONENT_INITIALIZED,
+        payload: {
+          componentName: this.name,
+          timestamp: new Date()
+        }
       });
     } catch (error) {
-      this.emitEvent({
-        type: EventType.COMPONENT_ERROR,
-        source: 'TelegramInterfaceAdapter',
-        timestamp: new Date(),
-        data: { error: error instanceof Error ? error.message : 'Unknown error' }
+      // Emit component error event
+      await this.eventEmitter.emit({
+        type: SystemEventType.COMPONENT_ERROR,
+        payload: {
+          componentName: this.name,
+          error: error as Error
+        }
       });
       throw error;
     }
@@ -121,11 +125,13 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
       throw new Error('Unsupported update type');
     }
 
-    this.emitEvent({
-      type: EventType.MESSAGE_RECEIVED,
-      source: 'TelegramInterfaceAdapter',
-      timestamp: new Date(),
-      data: { message: telegramMessage }
+    // Emit message received event
+    await this.eventEmitter.emit({
+      type: SystemEventType.MESSAGE_RECEIVED,
+      payload: {
+        message: telegramMessage,
+        requestId: telegramMessage.messageId.toString()
+      }
     });
 
     return telegramMessage;
@@ -318,12 +324,13 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
             this.messageQueue.push(queuedMessage); // Add back to end of queue
           } else {
             // Message failed after max retries
-            this.emitEvent({
-              type: EventType.COMPONENT_ERROR,
-              source: 'TelegramInterfaceAdapter',
-              timestamp: new Date(),
-              data: {
-                error: 'Message failed after max retries',
+            await this.eventEmitter.emit({
+              type: SystemEventType.COMPONENT_ERROR,
+              payload: {
+                componentName: this.name,
+                error: new Error('Message failed after max retries')
+              },
+              metadata: {
                 messageId: queuedMessage.id
               }
             });
@@ -333,11 +340,14 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
 
       // Check for rate limit hit
       if (this.messageQueue.length > 0 && !this.canSendNow()) {
-        this.emitEvent({
-          type: EventType.RATE_LIMIT_HIT,
-          source: 'TelegramInterfaceAdapter',
-          timestamp: new Date(),
-          data: { queueSize: this.messageQueue.length }
+        // We don't have a specific rate limit event in the new system
+        // Could emit a component error or create a custom event type
+        await this.eventEmitter.emit({
+          type: SystemEventType.COMPONENT_ERROR,
+          payload: {
+            componentName: this.name,
+            error: new Error(`Rate limit hit. Queue size: ${this.messageQueue.length}`)
+          }
         });
       }
     }, this.config.queueConfig.processingInterval) as any;
@@ -355,12 +365,6 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
       if (now.getTime() - entry.timestamp.getTime() > maxAge) {
         this.deduplicationCache.delete(updateId);
       }
-    }
-  }
-
-  private emitEvent(event: SystemEvent): void {
-    if (this.eventEmitter) {
-      this.eventEmitter.emit(event);
     }
   }
 

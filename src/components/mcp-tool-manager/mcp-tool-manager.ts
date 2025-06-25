@@ -26,112 +26,20 @@ import { ToolRegistry } from './tool-registry.ts';
 export class MCPToolManager implements IMCPToolManager, IComponent {
   public readonly name = 'MCPToolManager';
 
-  private clients!: Map<string, MCPStdioClient>;
-  private toolRegistry!: ToolRegistry;
+  private clients = new Map<string, MCPStdioClient>();
+  private toolRegistry = new ToolRegistry();
   private isInitialized = false;
   private configs: MCPServerConfig[] = [];
 
   constructor(private errorHandler?: IErrorHandler) {
-    console.log(`[DEBUG] MCPToolManager constructor called`);
-    this.initializeProperties();
-  }
-
-  /**
-   * Initialize/re-initialize core properties
-   */
-  private initializeProperties(): void {
-    this.clients = new Map<string, MCPStdioClient>();
-    this.toolRegistry = new ToolRegistry();
-    console.log(`[DEBUG] Properties initialized - clients:`, this.clients instanceof Map, this.clients.size);
-    console.log(`[DEBUG] Properties initialized - toolRegistry:`, this.toolRegistry instanceof ToolRegistry);
-    console.log(`[DEBUG] ToolRegistry.clear method exists:`, typeof this.toolRegistry.clear === 'function');
-  }
-
-  /**
-   * Get safe clients map (defensive)
-   */
-  private getClients(): Map<string, MCPStdioClient> {
-    // More test-friendly: allow objects with Map-like interface (for mocks)
-    if (!this.clients) {
-      console.warn(`[DEBUG] clients is null/undefined, creating safe fallback...`);
-      return new Map<string, MCPStdioClient>();
-    }
-
-    // Check if it has Map-like methods (covers both real Maps and mocked objects)
-    if (typeof this.clients.get === 'function' && typeof this.clients.entries === 'function') {
-      return this.clients;
-    }
-
-    console.warn(`[DEBUG] clients corrupted, creating safe fallback...`);
-    return new Map<string, MCPStdioClient>();
-  }
-
-  /**
-   * Get safe tool registry (defensive)
-   */
-  private getToolRegistry(): ToolRegistry {
-    if (!this.toolRegistry || !(this.toolRegistry instanceof ToolRegistry) || typeof this.toolRegistry.clear !== 'function') {
-      console.warn(`[DEBUG] toolRegistry corrupted, creating safe fallback...`);
-      return new ToolRegistry();
-    }
-    return this.toolRegistry;
-  }
-
-  /**
-   * Safe client method call wrapper for synchronous methods
-   */
-  private safeClientCall<T>(client: any, methodName: string, fallbackValue: T, ...args: any[]): T {
-    if (!client) {
-      console.warn(`[DEBUG] Client is null/undefined for method ${methodName}`);
-      return fallbackValue;
-    }
-
-    // Check if client has the method
-    if (typeof client[methodName] !== 'function') {
-      console.warn(`[DEBUG] Client method ${methodName} is not a function. Client type:`, typeof client);
-      console.warn(`[DEBUG] Client prototype:`, Object.getPrototypeOf(client));
-      console.warn(`[DEBUG] Available methods:`, Object.getOwnPropertyNames(client));
-      return fallbackValue;
-    }
-
-    try {
-      return client[methodName](...args);
-    } catch (error) {
-      console.error(`[DEBUG] Error calling client.${methodName}:`, error);
-      return fallbackValue;
-    }
-  }
-
-  /**
-   * Safe client method call wrapper for asynchronous methods
-   */
-  private async safeAsyncClientCall<T>(client: any, methodName: string, fallbackValue: T, ...args: any[]): Promise<T> {
-    if (!client) {
-      console.warn(`[DEBUG] Client is null/undefined for async method ${methodName}`);
-      return fallbackValue;
-    }
-
-    // Check if client has the method
-    if (typeof client[methodName] !== 'function') {
-      console.warn(`[DEBUG] Client async method ${methodName} is not a function. Client type:`, typeof client);
-      console.warn(`[DEBUG] Client prototype:`, Object.getPrototypeOf(client));
-      console.warn(`[DEBUG] Available methods:`, Object.getOwnPropertyNames(client));
-      return fallbackValue;
-    }
-
-    try {
-      return await client[methodName](...args);
-    } catch (error) {
-      console.error(`[DEBUG] Error calling client.${methodName}:`, error);
-      return fallbackValue;
-    }
+    console.log(`[MCPToolManager] Constructor called`);
   }
 
   /**
    * Initialize the component (IComponent interface)
    */
   async initialize(): Promise<void> {
-    console.log(`[DEBUG] MCPToolManager.initialize() called`);
+    console.log(`[MCPToolManager] Initialize called`);
     this.isInitialized = true;
   }
 
@@ -139,117 +47,72 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
    * Initialize the MCP Tool Manager with server configurations
    */
   async initializeWithConfigs(configs: MCPServerConfig[]): Promise<void> {
-    console.log(`[DEBUG] MCPToolManager.initializeWithConfigs() called with ${configs.length} configs`);
-    console.log(`[DEBUG-DIAGNOSTIC] About to start initialization...`);
+    console.log(`[MCPToolManager] Initializing with ${configs.length} configs`);
 
     this.configs = configs;
-    try {
-      // Clear existing clients safely
-      await this.shutdown();
 
-      // Ensure we have a fresh map
-      this.clients = new Map<string, MCPStdioClient>();
+    // Clear existing clients
+    await this.shutdown();
 
-      // Create clients for enabled servers
-      for (const config of configs) {
-        if (config.enabled) {
-          console.log(`[DEBUG] Creating client for ${config.name}`);
-          const client = new MCPStdioClient(config);
-          this.clients.set(config.name, client);
-        }
+    // Create clients for enabled servers
+    for (const config of configs) {
+      if (config.enabled) {
+        console.log(`[MCPToolManager] Creating client for ${config.name}`);
+        const client = new MCPStdioClient(config);
+        this.clients.set(config.name, client);
       }
-
-      // Connect to all servers
-      await this.connectAllServers();
-
-      // Refresh tool registry
-      await this.refreshToolRegistry();
-
-      this.isInitialized = true;
-      console.log(`[DEBUG] MCPToolManager initialization completed successfully`);
-
-    } catch (error) {
-      console.log(`[DEBUG-DIAGNOSTIC] initializeWithConfigs caught error:`, error);
-      console.log(`[DEBUG-DIAGNOSTIC] Error type:`, typeof error);
-      console.log(`[DEBUG-DIAGNOSTIC] Error instanceof Error:`, error instanceof Error);
-      this.handleError('initialize', error);
-      // Don't rethrow - tests expect graceful handling
-      console.log(`[DEBUG-DIAGNOSTIC] Handled error gracefully instead of rethrowing`);
     }
+
+    // Connect to all servers
+    await this.connectAllServers();
+
+    // Refresh tool registry
+    await this.refreshToolRegistry();
+
+    this.isInitialized = true;
+    console.log(`[MCPToolManager] Initialization completed`);
   }
 
   /**
    * Shutdown all MCP connections
    */
   async shutdown(): Promise<void> {
-    console.log(`[DEBUG] MCPToolManager.shutdown() called`);
-    console.log(`[DEBUG-DIAGNOSTIC] Starting shutdown process...`);
+    console.log(`[MCPToolManager] Shutting down`);
 
-    try {
-      const clients = this.getClients();
-      console.log(`[DEBUG-DIAGNOSTIC] Got clients for shutdown:`, clients.size);
-      const clientEntries = Array.from(clients.entries());
-
-      for (const [serverId, client] of clientEntries) {
-        try {
-          console.log(`[DEBUG] Disconnecting from server ${serverId}`);
-          await this.safeAsyncClientCall(client, 'disconnect', undefined);
-          console.log(`[DEBUG] Disconnected from ${serverId}`);
-        } catch (error) {
-          console.error(`Error disconnecting from server ${serverId}:`, error);
-        }
-      }
-
-      // Safe clear
+    const disconnectPromises = Array.from(this.clients.entries()).map(async ([serverId, client]) => {
       try {
-        if (this.clients && typeof this.clients.clear === 'function') {
-          this.clients.clear();
-        }
+        console.log(`[MCPToolManager] Disconnecting from ${serverId}`);
+        await client.disconnect();
       } catch (error) {
-        console.log(`[DEBUG-DIAGNOSTIC] Error clearing clients:`, error);
+        console.error(`[MCPToolManager] Error disconnecting from ${serverId}:`, error);
       }
+    });
 
-      // Safe tool registry clear
-      const toolRegistry = this.getToolRegistry();
-      try {
-        if (typeof toolRegistry.clear === 'function') {
-          toolRegistry.clear();
-        }
-      } catch (error) {
-        console.log(`[DEBUG-DIAGNOSTIC] Error clearing tool registry:`, error);
-      }
+    await Promise.all(disconnectPromises);
 
-      this.isInitialized = false;
-      console.log(`[DEBUG-DIAGNOSTIC] Shutdown completed successfully`);
+    this.clients.clear();
+    this.toolRegistry.clear();
+    this.isInitialized = false;
 
-    } catch (error) {
-      console.log(`[DEBUG-DIAGNOSTIC] shutdown() caught error:`, error);
-      console.log(`[DEBUG-DIAGNOSTIC] Error type:`, typeof error);
-      console.log(`[DEBUG-DIAGNOSTIC] Error instanceof Error:`, error instanceof Error);
-      // Don't rethrow - tests expect graceful handling
-      console.log(`[DEBUG-DIAGNOSTIC] Handled shutdown error gracefully`);
-    }
+    console.log(`[MCPToolManager] Shutdown completed`);
   }
 
   /**
    * Get component status (IComponent interface)
    */
   getStatus(): ComponentStatus {
-    const clients = this.getClients();
-    const toolRegistry = this.getToolRegistry();
-
-    const connectedServers = Array.from(clients.values()).filter(client =>
-      this.safeClientCall(client, 'isConnected', false)
-    ).length;
+    const connectedServers = Array.from(this.clients.values())
+      .filter(client => client.isConnected())
+      .length;
 
     return {
       name: this.name,
-      status: connectedServers > 0 || clients.size === 0 ? 'healthy' : 'unhealthy',
+      status: connectedServers > 0 || this.clients.size === 0 ? 'healthy' : 'unhealthy',
       lastHealthCheck: new Date(),
       metadata: {
-        totalServers: clients.size,
+        totalServers: this.clients.size,
         connectedServers,
-        totalTools: toolRegistry.getAllTools().length
+        totalTools: this.toolRegistry.getAllTools().length
       }
     };
   }
@@ -258,51 +121,42 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
    * Refresh tool registry by discovering tools from all servers
    */
   async refreshToolRegistry(): Promise<void> {
-    console.log(`[DEBUG] MCPToolManager.refreshToolRegistry() called`);
+    console.log(`[MCPToolManager] Refreshing tool registry`);
 
-    const clients = this.getClients();
-    const toolRegistry = this.getToolRegistry();
+    this.toolRegistry.clear();
 
-    try {
-      if (typeof toolRegistry.clear === 'function') {
-        toolRegistry.clear();
+    const discoveryPromises = Array.from(this.clients.entries()).map(async ([serverId, client]) => {
+      if (!client.isConnected()) {
+        console.log(`[MCPToolManager] Skipping disconnected server ${serverId}`);
+        return;
       }
-    } catch (error) {
-      // Ignore clear errors
-    }
-
-    const clientEntries = Array.from(clients.entries());
-    for (const [serverId, client] of clientEntries) {
-      const isConnected = this.safeClientCall(client, 'isConnected', false);
-      console.log(`[DEBUG] Checking connection for ${serverId}: ${isConnected}`);
-      if (!isConnected) continue;
 
       try {
         const tools = await this.discoverServerTools(serverId);
         for (const tool of tools) {
-          toolRegistry.registerTool(tool);
+          this.toolRegistry.registerTool(tool);
         }
-        console.log(`[DEBUG] Registered ${tools.length} tools from ${serverId}`);
+        console.log(`[MCPToolManager] Registered ${tools.length} tools from ${serverId}`);
       } catch (error) {
         this.handleError('refresh_tool_registry', error, { serverId });
       }
-    }
+    });
+
+    await Promise.all(discoveryPromises);
   }
 
   /**
    * Get all available tools
    */
   async getAvailableTools(): Promise<ToolDefinition[]> {
-    const toolRegistry = this.getToolRegistry();
-    return toolRegistry.getAllTools();
+    return this.toolRegistry.getAllTools();
   }
 
   /**
    * Get specific tool definition
    */
   async getToolDefinition(toolId: string): Promise<ToolDefinition | null> {
-    const toolRegistry = this.getToolRegistry();
-    return toolRegistry.getToolDefinition(toolId);
+    return this.toolRegistry.getToolDefinition(toolId);
   }
 
   /**
@@ -310,51 +164,28 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
    */
   async executeTool(call: ToolCall): Promise<ToolResult> {
     const startTime = Date.now();
-    const clients = this.getClients();
-    const toolRegistry = this.getToolRegistry();
 
     try {
-      const client = clients.get(call.serverId);
+      const client = this.clients.get(call.serverId);
       if (!client) {
-        return {
-          toolId: call.toolId,
-          success: false,
-          error: `Server '${call.serverId}' not found`,
-          executionTime: Date.now() - startTime
-        };
+        throw new Error(`Server '${call.serverId}' not found`);
       }
 
-      const isConnected = this.safeClientCall(client, 'isConnected', false);
-      if (!isConnected) {
-        return {
-          toolId: call.toolId,
-          success: false,
-          error: `Server '${call.serverId}' is not connected`,
-          executionTime: Date.now() - startTime
-        };
+      if (!client.isConnected()) {
+        throw new Error(`Server '${call.serverId}' is not connected`);
       }
 
       // Check if the tool exists in the registry
       const toolKey = `${call.serverId}/${call.toolId}`;
-      const tool = toolRegistry.getToolDefinition(toolKey);
+      const tool = this.toolRegistry.getToolDefinition(toolKey);
       if (!tool) {
-        return {
-          toolId: call.toolId,
-          success: false,
-          error: `Tool '${call.toolId}' not found on server '${call.serverId}'`,
-          executionTime: Date.now() - startTime
-        };
+        throw new Error(`Tool '${call.toolId}' not found on server '${call.serverId}'`);
       }
 
       const result = await this.executeToolInternal(client, call);
 
       // Update tool usage statistics
-      const toolId = `${call.serverId}/${call.toolId}`;
-      try {
-        toolRegistry.updateToolUsage(toolId, result.executionTime || 0);
-      } catch (error) {
-        // Ignore tool usage update errors
-      }
+      this.toolRegistry.updateToolUsage(toolKey, result.executionTime || 0);
 
       return result;
 
@@ -380,10 +211,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
    * Get server status
    */
   async getServerStatus(serverId: string): Promise<ServerStatus> {
-    const clients = this.getClients();
-    const toolRegistry = this.getToolRegistry();
-
-    const client = clients.get(serverId);
+    const client = this.clients.get(serverId);
     if (!client) {
       return {
         serverId,
@@ -392,11 +220,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       };
     }
 
-    const status = this.safeClientCall(client, 'getStatus', {
-      serverId,
-      status: 'disconnected' as any
-    });
-    const tools = toolRegistry.getToolsForServer(serverId);
+    const status = client.getStatus();
+    const tools = this.toolRegistry.getToolsForServer(serverId);
     return {
       ...status,
       toolCount: tools.length
@@ -407,11 +232,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
    * Get all server statuses
    */
   async getAllServerStatuses(): Promise<ServerStatus[]> {
-    const clients = this.getClients();
     const statuses: ServerStatus[] = [];
-    const serverIds = Array.from(clients.keys());
-
-    for (const serverId of serverIds) {
+    for (const serverId of this.clients.keys()) {
       statuses.push(await this.getServerStatus(serverId));
     }
     return statuses;
@@ -421,55 +243,31 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
    * Get circuit breaker status for a server
    */
   getCircuitBreakerStatus(serverId: string): CircuitBreakerStatus {
-    console.log(`[DEBUG] MCPToolManager.getCircuitBreakerStatus() called for ${serverId}`);
-    console.log(`[DEBUG-DIAGNOSTIC] this.clients type:`, typeof this.clients);
-    console.log(`[DEBUG-DIAGNOSTIC] this.clients instanceof Map:`, this.clients instanceof Map);
-    console.log(`[DEBUG-DIAGNOSTIC] this.clients size:`, this.clients?.size);
-
-    const clients = this.getClients();
-    console.log(`[DEBUG-DIAGNOSTIC] getClients() returned:`, clients.size, 'clients');
-    const client = clients.get(serverId);
-    console.log(`[DEBUG-DIAGNOSTIC] clients.get(${serverId}) returned:`, !!client);
-
+    const client = this.clients.get(serverId);
     if (!client) {
-      console.log(`[DEBUG-DIAGNOSTIC] No client found for ${serverId}, returning default 'closed' state`);
-      return {
-        state: 'closed' as any,
-        failureCount: 0
-      };
+      throw new Error(`Server '${serverId}' not found`);
     }
-
-    console.log(`[DEBUG-DIAGNOSTIC] Calling safeClientCall on client for ${serverId}`);
-    const result = this.safeClientCall(client, 'getCircuitBreakerStatus', {
-      state: 'closed' as any,
-      failureCount: 0
-    });
-    console.log(`[DEBUG-DIAGNOSTIC] safeClientCall returned:`, result);
-    return result;
+    return client.getCircuitBreakerStatus();
   }
 
   /**
    * Generate system prompt with available tools
    */
   generateSystemPromptTools(): string {
-    const toolRegistry = this.getToolRegistry();
-    return toolRegistry.generateSystemPromptTools();
+    return this.toolRegistry.generateSystemPromptTools();
   }
 
   /**
    * Connect to all configured servers
    */
   private async connectAllServers(): Promise<void> {
-    console.log(`[DEBUG] MCPToolManager.connectAllServers() called`);
+    console.log(`[MCPToolManager] Connecting to all servers`);
 
-    const clients = this.getClients();
-    const clientEntries = Array.from(clients.entries());
-
-    const connectionPromises = clientEntries.map(async ([serverId, client]) => {
+    const connectionPromises = Array.from(this.clients.entries()).map(async ([serverId, client]) => {
       try {
-        console.log(`[DEBUG] Connecting to server ${serverId}`);
-        await this.safeAsyncClientCall(client, 'connect', undefined);
-        console.log(`[DEBUG] Successfully connected to ${serverId}`);
+        console.log(`[MCPToolManager] Connecting to ${serverId}`);
+        await client.connect();
+        console.log(`[MCPToolManager] Successfully connected to ${serverId}`);
       } catch (error) {
         this.handleError('connect_server', error, { serverId });
       }
@@ -482,108 +280,71 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
    * Discover tools from a specific server
    */
   private async discoverServerTools(serverId: string): Promise<ToolDefinition[]> {
-    console.log(`[DEBUG] MCPToolManager.discoverServerTools() called for ${serverId}`);
+    console.log(`[MCPToolManager] Discovering tools from ${serverId}`);
 
-    const clients = this.getClients();
-    const client = clients.get(serverId);
-
-    if (!client) {
-      return [];
-    }
-
-    const isConnected = this.safeClientCall(client, 'isConnected', false);
-    if (!isConnected) {
+    const client = this.clients.get(serverId);
+    if (!client || !client.isConnected()) {
       return [];
     }
 
     try {
-      const requestId = this.safeClientCall(client, 'generateRequestId', `tools-list-${Date.now()}`);
-      const request: MCPRequest = {
-        jsonrpc: "2.0",
-        method: "tools/list",
-        id: requestId
-      };
+      const tools = await client.listTools();
 
-      const response = await this.safeAsyncClientCall(client, 'sendRequest', {
-        error: { message: 'Client method unavailable' },
-        result: { tools: [] }
-      }, request);
-      if (response.error) {
-        throw new Error(`Tools discovery failed: ${response.error.message}`);
-      }
-
-      const tools = response.result?.tools || [];
       return tools.map((tool: any) => ({
         serverId,
         name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema
+        description: tool.description || '',
+        inputSchema: tool.inputSchema || {},
+        outputSchema: tool.outputSchema
       }));
 
     } catch (error) {
-      this.handleError('discover_server_tools', error, { serverId });
-      return [];
+      console.error(`[MCPToolManager] Failed to discover tools from ${serverId}:`, error);
+      throw error;
     }
   }
 
   /**
-   * Execute tool on specific client (internal method)
+   * Execute tool using MCP protocol
    */
   private async executeToolInternal(client: MCPStdioClient, call: ToolCall): Promise<ToolResult> {
     const startTime = Date.now();
 
-    const requestId = this.safeClientCall(client, 'generateRequestId', `tool-call-${Date.now()}`);
-    const request: MCPToolRequest = {
-      jsonrpc: "2.0",
-      method: "tools/call",
-      params: {
-        name: call.toolId,
-        arguments: call.arguments
-      },
-      id: requestId
-    };
+    try {
+      console.log(`[MCPToolManager] Executing tool ${call.toolId} on ${call.serverId}`);
 
-    const response = await this.safeAsyncClientCall(client, 'sendRequest', {
-      error: { message: 'Client method unavailable' },
-      result: null
-    }, request);
-    const executionTime = Date.now() - startTime;
+      const result = await client.callTool(call.toolId, call.arguments);
 
-    if (response.error) {
+      console.log(`[MCPToolManager] Tool execution completed in ${Date.now() - startTime}ms`);
+
       return {
         toolId: call.toolId,
-        success: false,
-        error: response.error.message,
-        executionTime
+        success: true,
+        output: result,
+        executionTime: Date.now() - startTime
       };
-    }
 
-    return {
-      toolId: call.toolId,
-      success: true,
-      output: response.result,
-      executionTime
-    };
+    } catch (error) {
+      console.error(`[MCPToolManager] Tool execution failed:`, error);
+      throw error;
+    }
   }
 
   /**
-   * Handle errors with optional context
+   * Handle errors with optional error handler
    */
   private handleError(operation: string, error: unknown, contextData?: Record<string, any>): void {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`MCPToolManager error in ${operation}:`, error);
+    console.error(`[MCPToolManager] Error in ${operation}:`, error, contextData);
 
-    if (this.errorHandler && error instanceof Error) {
-      const errorContext: ErrorContext = {
-        component: this.name,
-        operation,
-        metadata: {
-          errorMessage,
-          timestamp: new Date(),
+    if (this.errorHandler) {
+      this.errorHandler.handleError(
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: this.name,
+          operation,
           ...contextData
         }
-      };
-      this.errorHandler.handleError(error, errorContext);
+      );
     }
   }
 }
