@@ -67,9 +67,9 @@ async function testEndpoint(testCase: TestCase): Promise<void> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        message: testCase.message,
-        chatId: testCase.chatId,
-        userId: 12345,
+        text: testCase.message,
+        chatId: String(testCase.chatId),
+        userId: "12345",
         username: "testuser",
         firstName: "Test User"
       }),
@@ -145,19 +145,19 @@ async function testConversationHistory(): Promise<void> {
 async function testInvalidRequests(): Promise<void> {
   console.log("\n🚫 Testing Invalid Requests");
 
-  // Test missing message
+  // Test missing text (was message)
   try {
     const response = await fetch(`${BASE_URL}/test/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId: 999 }),
+      body: JSON.stringify({ chatId: "999" }),
     });
 
     const result = await response.json();
     if (response.status === 400 && !result.success) {
-      console.log("✅ Correctly rejected request with missing message");
+      console.log("✅ Correctly rejected request with missing text");
     } else {
-      console.log("❌ Should have rejected request with missing message");
+      console.log("❌ Should have rejected request with missing text");
     }
   } catch (error) {
     console.log(`💥 Invalid request test failed: ${error.message}`);
@@ -168,7 +168,7 @@ async function testInvalidRequests(): Promise<void> {
     const response = await fetch(`${BASE_URL}/test/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: "Hello" }),
+      body: JSON.stringify({ text: "Hello" }),
     });
 
     const result = await response.json();
@@ -209,11 +209,11 @@ async function runAllTests(): Promise<void> {
   console.log("# Basic test");
   console.log(`curl -X POST ${BASE_URL}/test/message \\`);
   console.log(`  -H "Content-Type: application/json" \\`);
-  console.log(`  -d '{"message": "Hello!", "chatId": 999}'`);
+  console.log(`  -d '{"text": "Hello!", "chatId": "999", "userId": "12345"}'`);
   console.log("\n# Weather test");
   console.log(`curl -X POST ${BASE_URL}/test/message \\`);
   console.log(`  -H "Content-Type: application/json" \\`);
-  console.log(`  -d '{"message": "What is the weather in San Francisco?", "chatId": 999}'`);
+  console.log(`  -d '{"text": "What is the weather in San Francisco?", "chatId": "999", "userId": "12345"}'`);
 }
 
 // Run tests if this script is executed directly
