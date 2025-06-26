@@ -1,3 +1,4 @@
+import "std/dotenv/load.ts";
 import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
 import { eventBus, createEventEmitter, SystemEventType } from "./services/event-bus/index.ts";
