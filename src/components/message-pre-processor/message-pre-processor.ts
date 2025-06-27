@@ -191,6 +191,16 @@ export class MessagePreProcessor implements IMessagePreProcessor {
       this.stats.errorCount++;
       console.error('[MessagePreProcessor] Analysis error:', error);
 
+      // Check if this is an API authentication error
+      if (error.message && error.message.includes('401')) {
+        console.error('[MessagePreProcessor] AUTHENTICATION ERROR: OpenRouter API key invalid or missing');
+        console.error('[MessagePreProcessor] Check OPENROUTER_API_KEY environment variable');
+      } else if (error.message && error.message.includes('OpenRouter API error')) {
+        console.error('[MessagePreProcessor] OpenRouter API Error:', error.message);
+      } else {
+        console.error('[MessagePreProcessor] LLM Service Error:', error.message);
+      }
+
       // Emit component error event
       await this.eventEmitter.emit<ComponentErrorEvent>({
         type: SystemEventType.COMPONENT_ERROR,
@@ -200,8 +210,11 @@ export class MessagePreProcessor implements IMessagePreProcessor {
         }
       });
 
-      // Return fallback analysis
+      // Return fallback analysis with error context
+      console.log('[MessagePreProcessor] Falling back to rule-based analysis due to LLM failure');
       const fallback = this.createFallbackAnalysis(message);
+      // Add error metadata to fallback
+      fallback.confidence = Math.max(fallback.confidence - 0.3, 0.1); // Reduce confidence due to error
       this.updateStats(fallback, Date.now() - startTime);
       return fallback;
     }

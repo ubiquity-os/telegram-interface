@@ -170,22 +170,18 @@ export class DecisionEngine implements IDecisionEngine {
       this.stateMachine.transition(chatId, DecisionEvent.ANALYSIS_COMPLETE);
 
       // Make the actual decision
+      console.log(`[DecisionEngine] About to analyze and decide - Current state: ${this.stateMachine.getCurrentState(chatId)}`);
       const decision = await this.analyzeAndDecide(context);
+      console.log(`[DecisionEngine] Decision made:`, {
+        action: decision.action,
+        toolCallsCount: decision.toolCalls?.length ?? 0,
+        responseStrategy: decision.responseStrategy?.type,
+        currentState: this.stateMachine.getCurrentState(chatId)
+      });
 
-      console.log(`[DecisionEngine] BEFORE TRANSITION - Current state: ${this.stateMachine.getCurrentState(chatId)}, Decision action: ${decision.action}`);
-
-      // Transition based on decision
-      if (decision.action === 'execute_tools') {
-        console.log(`[DecisionEngine] TRANSITIONING: ${this.stateMachine.getCurrentState(chatId)} -> TOOLS_REQUIRED`);
-        this.stateMachine.transition(chatId, DecisionEvent.TOOLS_REQUIRED, {
-          toolCount: decision.toolCalls?.length ?? 0
-        });
-        console.log(`[DecisionEngine] AFTER TRANSITION: Current state is ${this.stateMachine.getCurrentState(chatId)}`);
-      } else {
-        console.log(`[DecisionEngine] TRANSITIONING: ${this.stateMachine.getCurrentState(chatId)} -> RESPONSE_GENERATED`);
-        this.stateMachine.transition(chatId, DecisionEvent.RESPONSE_GENERATED);
-        console.log(`[DecisionEngine] AFTER TRANSITION: Current state is ${this.stateMachine.getCurrentState(chatId)}`);
-      }
+      // The analyzeAndDecide method should have already handled the state transitions
+      // No additional transitions needed here since analyzeAndDecide handles the flow
+      console.log(`[DecisionEngine] Final state after decision: ${this.stateMachine.getCurrentState(chatId)}`);
 
       // Update metrics
       const duration = Date.now() - startTime;
@@ -404,25 +400,40 @@ export class DecisionEngine implements IDecisionEngine {
     }
 
     // Transition to DECISION_POINT state
+    console.log(`[DecisionEngine] TRANSITIONING: ${this.stateMachine.getCurrentState(chatId)} -> DECISION_POINT`);
     this.stateMachine.transition(chatId, DecisionEvent.ANALYSIS_COMPLETE);
+    console.log(`[DecisionEngine] Successfully transitioned to: ${this.stateMachine.getCurrentState(chatId)}`);
 
     // Apply decision rules based on intent
-    switch (analysis.intent) {
-      case 'tool_request':
-        return this.handleToolRequestIntent(context, analysis, availableToolNames, chatId);
+    console.log(`[DecisionEngine] Processing intent: ${analysis.intent} with confidence: ${analysis.confidence}`);
 
-      case 'command':
-        return this.handleCommandIntent(analysis, availableToolNames, chatId);
+    try {
+      switch (analysis.intent) {
+        case 'tool_request':
+          return await this.handleToolRequestIntent(context, analysis, availableToolNames, chatId);
 
-      case 'question':
-        return this.handleQuestionIntent(analysis, availableToolNames, chatId);
+        case 'command':
+          return await this.handleCommandIntent(analysis, availableToolNames, chatId);
 
-      case 'conversation':
-        return this.handleConversationIntent(analysis, chatId);
+        case 'question':
+          return await this.handleQuestionIntent(analysis, availableToolNames, chatId);
 
-      default:
-        // Fallback for unknown intents
-        return this.createDirectResponseDecision(analysis, 'casual');
+        case 'conversation':
+          return await this.handleConversationIntent(analysis, chatId);
+
+        default:
+          // Fallback for unknown intents - transition to direct response
+          console.log(`[DecisionEngine] Unknown intent: ${analysis.intent}, using direct response`);
+          this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+          return this.createDirectResponseDecision(analysis, 'casual');
+      }
+    } catch (error) {
+      console.error(`[DecisionEngine] Error in intent handling:`, error);
+      this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
+        error: error.message,
+        intent: analysis.intent
+      });
+      throw error;
     }
   }
 

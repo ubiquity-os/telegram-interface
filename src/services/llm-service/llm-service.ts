@@ -65,8 +65,14 @@ export class LlmService {
     this.apiKey = config.apiKey || Deno.env.get('OPENROUTER_API_KEY') || '';
 
     if (!this.apiKey) {
+      console.error('[LlmService] CRITICAL: No OpenRouter API key found');
+      console.error('[LlmService] Set OPENROUTER_API_KEY environment variable or pass apiKey in config');
       throw new Error('OpenRouter API key is required. Set OPENROUTER_API_KEY environment variable.');
     }
+
+    console.log(`[LlmService] Initialized with API key: ${this.apiKey.substring(0, 20)}...`);
+    console.log(`[LlmService] Default model: ${this.config.model}`);
+    console.log(`[LlmService] Fallback models: ${this.config.fallbackModels?.slice(0, 3).join(', ')}...`);
   }
 
   async generateResponse(
