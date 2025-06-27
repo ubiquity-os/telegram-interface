@@ -146,20 +146,29 @@ export class LlmService {
     const raceForSuccess = new Promise<LLMResponse>((resolve, reject) => {
       let completedCount = 0;
       let lastError: Error | null = null;
+      let raceWon = false; // Track if race has been won
 
       allModels.forEach(async (model) => {
         try {
           const result = await this.tryModel(model, messages, mergedConfig);
           const totalTime = Date.now() - startTime;
-          console.log(`[LlmService] RACING SUCCESS: ${model} responded first in ${totalTime}ms`);
-          resolve(result);
+
+          // Check if this is the actual race winner
+          if (!raceWon) {
+            raceWon = true;
+            console.log(`[LlmService] RACING SUCCESS: ${model} responded first in ${totalTime}ms`);
+            resolve(result);
+          } else {
+            // This model completed after the race was already won
+            console.log(`[LlmService] Model ${model} completed in ${totalTime}ms (race already finished)`);
+          }
         } catch (error) {
           completedCount++;
           lastError = error as Error;
           console.warn(`[LlmService] Model ${model} failed in race:`, (error as Error).message);
 
-          // If all models have failed, reject
-          if (completedCount === allModels.length) {
+          // If all models have failed and no one has won yet, reject
+          if (completedCount === allModels.length && !raceWon) {
             reject(lastError || new Error('All models failed'));
           }
         }
