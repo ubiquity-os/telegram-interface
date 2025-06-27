@@ -130,13 +130,12 @@ export function createContainer(): Container {
     .to(LlmService)
     .inSingletonScope();
 
-  container.bind(TYPES.LLMService)
+  container.bind(TYPES.LLMServiceAdapter)
     .to(LLMServiceAdapter)
     .inSingletonScope();
 
   container.bind(TYPES.ContextStorage)
-    .to(KVContextStorage)
-    .inSingletonScope();
+    .toConstantValue(new KVContextStorage());
 
   container.bind<IErrorHandler>(TYPES.ErrorHandler)
     .to(SimpleErrorHandler)
@@ -184,16 +183,6 @@ export function createContainer(): Container {
   container.bind<ISystemOrchestrator>(TYPES.SystemOrchestrator)
     .to(SystemOrchestrator)
     .inSingletonScope();
-
-  // Factory for creating configured LLM service instances
-  container.bind<(config: any) => LlmService>(TYPES.LLMServiceFactory)
-    .toFactory(() => {
-      return (config: any) => {
-        const service = new LlmService();
-        // Configure service with provided config
-        return service;
-      };
-    });
 
   return container;
 }
@@ -259,6 +248,10 @@ export async function bootstrap(config: {
 
   // Get the system orchestrator
   const orchestrator = container.get<ISystemOrchestrator>(TYPES.SystemOrchestrator);
+
+  // Initialize the LLM service
+  const llmService = container.get<LlmService>(TYPES.LLMService);
+  await llmService.init();
 
   // Initialize the orchestrator with config
   const orchestratorConfig = container.get<SystemOrchestratorConfig>(TYPES.SystemOrchestratorConfig);

@@ -4,8 +4,10 @@
  * Now includes circuit breaker protection against API failures
  */
 
-import { CircuitBreaker, CircuitOpenError } from '../../reliability/circuit-breaker.ts';
+import { injectable } from 'npm:inversify@7.5.4';
+import { CircuitBreaker } from '../../reliability/circuit-breaker.ts';
 import { getCircuitBreakerConfig } from '../../reliability/circuit-breaker-configs.ts';
+import { modelDiscoveryService } from './model-discovery.ts';
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant';
@@ -32,37 +34,19 @@ export interface LLMConfig {
   fallbackModels?: string[];
 }
 
+@injectable()
 export class LlmService {
   private config: LLMConfig;
   private readonly apiKey: string;
   private readonly baseURL = 'https://openrouter.ai/api/v1/chat/completions';
   private readonly circuitBreaker: CircuitBreaker<any>;
-
-  // Fast reasoning models - run in parallel with Promise.race()
-  private readonly reasoningModels = [
-    "deepseek/deepseek-r1-0528:free",
-    "tngtech/deepseek-r1t-chimera:free",
-    "microsoft/mai-ds-r1:free",
-    "deepseek/deepseek-r1-0528-qwen3-8b:free",
-    "deepseek/deepseek-r1:free",
-    "deepseek/deepseek-r1-distill-llama-70b:free",
-    "deepseek/deepseek/deepseek-r1-distill-qwen-7b",
-  ];
-
-  // Regular chat models - fallback if reasoning fails
-  private readonly chatModels = [
-    "deepseek/deepseek-chat-v3-0324:free",
-    "deepseek/deepseek-chat:free",
-    "deepseek/deepseek-v3-base:free",
-    "google/gemini-2.0-flash-exp:free",
-  ];
-
-  private readonly defaultModels = [...this.reasoningModels, ...this.chatModels];
+  private reasoningModels: string[] = [];
+  private chatModels: string[] = [];
 
   constructor(config: LLMConfig = {}) {
     this.config = {
       model: 'deepseek/deepseek-r1-0528:free',
-      fallbackModels: this.defaultModels,
+      fallbackModels: [],
       temperature: 0.7,
       maxTokens: 2000,
       ...config
@@ -82,11 +66,57 @@ export class LlmService {
       'llm-service',
       getCircuitBreakerConfig('llm')
     );
+  }
 
+  public async init(): Promise<void> {
+    console.log(`[LlmService] Starting initialization...`);
+    await this.loadModels();
+    console.log(`[LlmService] After loadModels - Reasoning: ${this.reasoningModels.length}, Chat: ${this.chatModels.length}`);
     console.log(`[LlmService] Initialized with API key: ${this.apiKey.substring(0, 20)}...`);
     console.log(`[LlmService] Default model: ${this.config.model}`);
-    console.log(`[LlmService] Fallback models: ${this.config.fallbackModels?.slice(0, 3).join(', ')}...`);
+    console.log(`[LlmService] Reasoning models (${this.reasoningModels.length}): ${this.reasoningModels.slice(0, 3).join(', ')}...`);
+    console.log(`[LlmService] Chat models (${this.chatModels.length}): ${this.chatModels.slice(0, 3).join(', ')}...`);
     console.log(`[LlmService] Circuit breaker initialized for LLM service`);
+  }
+
+  private async loadModels(): Promise<void> {
+    console.log(`[LlmService] loadModels() started`);
+    try {
+      console.log(`[LlmService] Calling modelDiscoveryService.getModels()...`);
+      const result = await modelDiscoveryService.getModels();
+      console.log(`[LlmService] Discovery returned:`, {
+        reasoningCount: result.reasoningModels.length,
+        chatCount: result.chatModels.length,
+        reasoning: result.reasoningModels,
+        chat: result.chatModels
+      });
+
+      this.reasoningModels = result.reasoningModels;
+      this.chatModels = result.chatModels;
+      this.config.fallbackModels = [...result.reasoningModels, ...result.chatModels];
+      if (result.reasoningModels.length > 0) {
+        this.config.model = result.reasoningModels[0];
+      }
+      console.log(`[LlmService] Dynamic model discovery successful - set ${this.reasoningModels.length + this.chatModels.length} models`);
+    } catch (error) {
+      console.error(`[LlmService] Model discovery failed:`, error);
+      console.log(`[LlmService] Using hardcoded fallback models`);
+
+      // Hardcoded fallback models (last resort)
+      this.reasoningModels = [
+        "deepseek/deepseek-r1-0528:free",
+        "deepseek/deepseek-r1:free",
+        "deepseek/deepseek-r1-distill-llama-70b:free"
+      ];
+      this.chatModels = [
+        "deepseek/deepseek-chat:free",
+        "deepseek/deepseek-chat-v3-0324:free"
+      ];
+      this.config.fallbackModels = [...this.reasoningModels, ...this.chatModels];
+      this.config.model = this.reasoningModels[0];
+      console.log(`[LlmService] Fallback models set - ${this.reasoningModels.length + this.chatModels.length} total`);
+    }
+    console.log(`[LlmService] loadModels() completed`);
   }
 
   async generateResponse(
@@ -95,9 +125,20 @@ export class LlmService {
   ): Promise<LLMResponse> {
     const mergedConfig = { ...this.config, ...options };
 
+    // Check if models are loaded, if not, initialize them
+    if (this.reasoningModels.length === 0 && this.chatModels.length === 0) {
+      console.log(`[LlmService] No models loaded, attempting to reload...`);
+      await this.loadModels();
+    }
+
     // Race ALL models together (reasoning + chat models)
     const allModels = [...this.reasoningModels, ...this.chatModels];
     console.log(`[LlmService] RACING all models together: ${allModels.join(', ')}`);
+
+    // Final safety check
+    if (allModels.length === 0) {
+      throw new Error('[LlmService] No models available after initialization attempt');
+    }
 
     const startTime = Date.now();
 
@@ -317,6 +358,3 @@ export class LlmService {
     console.log('[LlmService] Circuit breaker reset');
   }
 }
-
-// Export a default instance for easy importing
-export const llmService = new LlmService();

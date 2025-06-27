@@ -13,7 +13,7 @@ export class PromptBuilder {
    * Build the system prompt for message analysis
    */
   static buildSystemPrompt(): string {
-    return `You are a message analysis expert for a Telegram bot. Your task is to analyze incoming messages and extract structured information.
+    return `You are a message analysis expert for a chatbot. Your task is to analyze incoming messages and extract structured information.
 
 You must respond with a JSON object matching this exact structure:
 {

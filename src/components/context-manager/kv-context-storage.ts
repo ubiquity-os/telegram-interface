@@ -2,6 +2,7 @@
  * Deno KV implementation of IContextStorage
  */
 
+import { injectable, unmanaged } from 'npm:inversify@7.5.4';
 import {
   IContextStorage,
   StorageStats,
@@ -15,11 +16,12 @@ import {
   InternalMessage
 } from '../../interfaces/message-types.ts';
 
+@injectable()
 export class KVContextStorage implements IContextStorage {
   private kv: Deno.Kv | null = null;
   private kvPath?: string;
 
-  constructor(kvPath?: string) {
+  constructor(@unmanaged() kvPath?: string) {
     this.kvPath = kvPath;
   }
 

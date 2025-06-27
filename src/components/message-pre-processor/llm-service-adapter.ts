@@ -5,28 +5,29 @@
  * required by the MessagePreProcessor
  */
 
-import { injectable } from 'npm:inversify@7.5.4';
+import { injectable, inject } from 'npm:inversify@7.5.4';
 import type { ILLMService } from './types.ts';
-import { llmService } from '../../services/llm-service/llm-service.ts';
-import { OpenRouterMessage } from '../../services/openrouter-types.ts';
+import { LlmService, LLMMessage } from '../../services/llm-service/llm-service.ts';
+import { TYPES } from '../../core/types.ts';
 
 @injectable()
 export class LLMServiceAdapter implements ILLMService {
+  constructor(
+    @inject(TYPES.LLMService) private llmService: LlmService
+  ) {}
+
   async getAiResponse(params: {
     messages: Array<{
       role: 'system' | 'user' | 'assistant';
       content: string;
     }>;
   }): Promise<string> {
-    // Convert to OpenRouterMessage format
-    const openRouterMessages: OpenRouterMessage[] = params.messages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
+    // The type is already compatible, so no conversion is needed.
+    const llmMessages: LLMMessage[] = params.messages;
 
     // Call the actual LLM service
-    return await llmService.getAiResponse({
-      messages: openRouterMessages
+    return await this.llmService.getAiResponse({
+      messages: llmMessages
     });
   }
 }
