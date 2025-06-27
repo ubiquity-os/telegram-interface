@@ -83,7 +83,18 @@
 - Performance targets achieved (<2s response time) - VERIFIED under test conditions
 - API contract issues RESOLVED - E2E tests now pass completely
 - Runtime integration FIXED - System processes messages correctly end-to-end
+- LOGGING SYSTEM IMPLEMENTED: Console override with file persistence and rotation - VERIFIED WORKING
 - Ready for Phase 4: Testing and Monitoring - No blocking issues
+
+### Logging System Patterns (NEW - June 2025)
+- Console override pattern captures ALL console output to files without losing terminal display
+- POSIX timestamp rotation (Math.floor(Date.now() / 1000)) for chronological log organization
+- Session-based rotation triggered by system startup and message processing
+- Dual output strategy: terminal for development + files for debugging/analysis
+- Autonomous debugging via logs/latest.log for current session analysis
+- Historical analysis via logs/[timestamp].log for cross-session investigation
+- Non-blocking async file writes to prevent performance impact
+- Integration points: src/main.ts, src/core/start-api-server.ts, src/core/message-router.ts
 
 ### Known Project Evolution
 - Started as simple Telegram bot (Phase 1)

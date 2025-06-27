@@ -48,6 +48,14 @@
 - **TTL**: Time-based expiration for data freshness
 - **Strategy**: Multi-layer caching with intelligent invalidation
 
+#### Logging System
+- **Rotating Log Manager**: Console override with file persistence
+- **File Structure**: `logs/latest.log` (current) + `logs/[timestamp].log` (historical)
+- **Log Rotation**: POSIX timestamp-based session separation
+- **Integration**: System boot and message processing triggers
+- **Observability**: Dual output (terminal + file) for debugging
+- **Location**: `src/utils/log-manager.ts` for implementation
+
 ### Development Tools
 
 #### Package Management
