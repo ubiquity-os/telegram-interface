@@ -6,7 +6,7 @@
 import { getConfig } from '../utils/config.ts';
 
 // Core Services
-import { LlmService } from '../services/llm-service/llm-service.ts';
+import { LlmService } from '../services/llm-service/index.ts';
 
 // Components
 import { ErrorHandler } from '../components/error-handler/error-handler.ts';
@@ -26,7 +26,7 @@ import type { MessagePreProcessorConfig } from '../components/message-pre-proces
 import type { DecisionEngineConfig } from '../components/decision-engine/types.ts';
 import type { ResponseGeneratorConfig } from '../components/response-generator/types.ts';
 import type { TelegramInterfaceAdapterConfig } from '../components/telegram-interface-adapter/types.ts';
-import type { LLMConfig } from '../services/llm-service/llm-service.ts';
+import type { LLMConfig } from '../services/llm-service/index.ts';
 import { ErrorCategory } from '../interfaces/component-interfaces.ts';
 
 /**
@@ -51,7 +51,11 @@ export async function createLLMService(): Promise<LlmService> {
 
   const llmConfig: LLMConfig = {
     apiKey: config.openRouterApiKey,
-    model: 'deepseek/deepseek-r1-0528:free',
+    models: [
+      'deepseek/deepseek-r1-0528:free',
+      'microsoft/mai-ds-r1:free',
+      'deepseek/deepseek-r1:free',
+    ],
     temperature: 0.7,
     maxTokens: 2000
   };

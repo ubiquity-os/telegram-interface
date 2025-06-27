@@ -2,5 +2,5 @@
  * LLM Service Module Exports
  */
 
-export { LlmService } from './llm-service.ts';
-export type { LLMMessage, LLMResponse, LLMConfig } from './llm-service.ts';
+export { OpenRouterLlmService as LlmService } from './openrouter-llm-service.ts';
+export type { LLMMessage, LLMResponse, LLMConfig } from './openrouter-llm-service.ts';

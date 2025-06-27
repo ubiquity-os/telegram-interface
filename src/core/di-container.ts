@@ -32,7 +32,7 @@ import { CachedContextManager } from '../components/context-manager/cached-conte
 import { ResponseGenerator } from '../components/response-generator/response-generator.ts';
 
 // Import services
-import { LlmService } from '../services/llm-service/llm-service.ts';
+import { OpenRouterLlmService } from '../services/llm-service/openrouter-llm-service.ts';
 import { SimpleErrorHandler } from '../services/error-handler.ts';
 import { LLMServiceAdapter } from '../components/message-pre-processor/llm-service-adapter.ts';
 import { KVContextStorage } from '../components/context-manager/kv-context-storage.ts';
@@ -126,8 +126,8 @@ export function createContainer(): Container {
     });
 
   // Bind services
-  container.bind<LlmService>(TYPES.LLMService)
-    .to(LlmService)
+  container.bind<OpenRouterLlmService>(TYPES.LLMService)
+    .to(OpenRouterLlmService)
     .inSingletonScope();
 
   container.bind(TYPES.LLMServiceAdapter)
@@ -250,7 +250,7 @@ export async function bootstrap(config: {
   const orchestrator = container.get<ISystemOrchestrator>(TYPES.SystemOrchestrator);
 
   // Initialize the LLM service
-  const llmService = container.get<LlmService>(TYPES.LLMService);
+  const llmService = container.get<OpenRouterLlmService>(TYPES.LLMService);
   await llmService.init();
 
   // Initialize the orchestrator with config

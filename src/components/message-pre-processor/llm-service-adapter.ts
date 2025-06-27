@@ -7,7 +7,7 @@
 
 import { injectable, inject } from 'npm:inversify@7.5.4';
 import type { ILLMService } from './types.ts';
-import { LlmService, LLMMessage } from '../../services/llm-service/llm-service.ts';
+import { LlmService, LLMMessage } from '../../services/llm-service/index.ts';
 import { TYPES } from '../../core/types.ts';
 
 @injectable()

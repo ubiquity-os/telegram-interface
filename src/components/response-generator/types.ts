@@ -15,7 +15,7 @@ import {
   MessageAnalysis
 } from '../../interfaces/message-types.ts';
 
-import { LlmService } from '../../services/llm-service/llm-service.ts';
+import { LlmService } from '../../services/llm-service/index.ts';
 
 // Re-export common types for convenience
 export type {

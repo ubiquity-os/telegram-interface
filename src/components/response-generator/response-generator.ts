@@ -20,7 +20,7 @@ import {
   GeneratedResponse,
   InlineKeyboard
 } from '../../interfaces/message-types.ts';
-import { LlmService } from '../../services/llm-service/llm-service.ts';
+import { LlmService } from '../../services/llm-service/index.ts';
 import { OpenRouterMessage } from '../../services/openrouter-types.ts';
 
 import {
