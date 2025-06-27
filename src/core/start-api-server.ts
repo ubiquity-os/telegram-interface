@@ -1,49 +1,29 @@
 /**
  * API Server Startup Script
  *
- * Minimal startup for Phase 1 - bypasses complex SystemOrchestrator
+ * Updated to use real SystemOrchestrator instead of mock
  */
 
 import { CoreApiServer, createDefaultCoreApiServerConfig } from './api-server.ts';
 import { MessageRouter, createDefaultMessageRouterConfig } from './message-router.ts';
 import { SessionManager, createDefaultSessionManagerConfig } from './session-manager.ts';
-
-/**
- * Create a minimal mock SystemOrchestrator for Phase 1
- */
-class MockSystemOrchestrator {
-  async handleUpdate(update: any): Promise<void> {
-    console.log('[MockSystemOrchestrator] Processing update:', JSON.stringify(update, null, 2));
-    // For Phase 1, just log the message - no actual processing
-    // This will be replaced with real SystemOrchestrator in Phase 2
-  }
-
-  getComponent<T>(componentName: string): T | null {
-    console.log(`[MockSystemOrchestrator] Component requested: ${componentName}`);
-    // Return null for now - tools endpoint will return empty array
-    return null;
-  }
-
-  async shutdown(): Promise<void> {
-    console.log('[MockSystemOrchestrator] Mock shutdown completed');
-  }
-}
+import { createSystemOrchestrator } from './component-factory.ts';
 
 /**
  * Main startup function
  */
 async function startApiServer(): Promise<void> {
-  console.log('[StartupScript] Starting Core API Server (Phase 1 - Minimal Mode)...');
+  console.log('[StartupScript] Starting Core API Server with Real SystemOrchestrator...');
 
   try {
-    // Create mock SystemOrchestrator for Phase 1
-    console.log('[StartupScript] Creating MockSystemOrchestrator...');
-    const mockSystemOrchestrator = new MockSystemOrchestrator();
+    // Create real SystemOrchestrator with all components
+    console.log('[StartupScript] Creating Real SystemOrchestrator...');
+    const systemOrchestrator = await createSystemOrchestrator();
 
-    // Create MessageRouter with mock orchestrator
+    // Create MessageRouter with real orchestrator
     console.log('[StartupScript] Creating MessageRouter...');
     const messageRouterConfig = createDefaultMessageRouterConfig();
-    const messageRouter = new MessageRouter(messageRouterConfig, mockSystemOrchestrator as any);
+    const messageRouter = new MessageRouter(messageRouterConfig, systemOrchestrator as any);
 
     // Create SessionManager
     console.log('[StartupScript] Creating SessionManager...');
@@ -57,7 +37,7 @@ async function startApiServer(): Promise<void> {
 
     // Override authentication for development (disable by default)
     apiServerConfig.authentication.required = false;
-    console.log('[StartupScript] Authentication disabled for Phase 1 development');
+    console.log('[StartupScript] Authentication disabled for development');
 
     // Set environment-based API keys if available
     const apiKeysEnv = Deno.env.get('API_KEYS');
@@ -92,7 +72,7 @@ async function startApiServer(): Promise<void> {
       try {
         await apiServer.stop();
         await sessionManager.shutdown();
-        await mockSystemOrchestrator.shutdown();
+        await systemOrchestrator.shutdown();
         console.log('[StartupScript] Graceful shutdown completed');
         Deno.exit(0);
       } catch (error) {
@@ -106,13 +86,14 @@ async function startApiServer(): Promise<void> {
     Deno.addSignalListener("SIGTERM", () => shutdown("SIGTERM"));
 
     console.log('[StartupScript] ✅ API Server startup completed successfully');
-    console.log('[StartupScript] 🚀 Server is ready to accept requests');
+    console.log('[StartupScript] 🚀 Server is ready to accept requests with REAL AI RESPONSES');
     console.log('[StartupScript] 📚 Available endpoints:');
     console.log('[StartupScript]   - GET  /api/v1/health');
     console.log('[StartupScript]   - POST /api/v1/messages');
     console.log('[StartupScript]   - POST /api/v1/sessions');
     console.log('[StartupScript]   - GET  /api/v1/sessions/:id');
     console.log('[StartupScript]   - GET  /api/v1/tools');
+    console.log('[StartupScript] 🧠 AI System: ENABLED - Real LLM responses via SystemOrchestrator');
     console.log('[StartupScript] 🛑 Press Ctrl+C to gracefully shutdown');
 
   } catch (error) {
@@ -134,6 +115,6 @@ async function startApiServer(): Promise<void> {
 // Only run if this file is being executed directly
 if (import.meta.main) {
   console.log('[StartupScript] 🌟 Core API Server startup script starting...');
-  console.log('[StartupScript] 📝 Phase 1: Platform-agnostic API layer');
+  console.log('[StartupScript] 🧠 Phase 2+: Real AI System with SystemOrchestrator');
   await startApiServer();
 }

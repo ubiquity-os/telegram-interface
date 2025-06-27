@@ -9,11 +9,16 @@ import {
   UniversalMessage,
   UniversalResponse,
   UMPError,
-  UMPErrorType
+  UMPErrorType,
+  Session,
+  SessionState,
+  SessionContext,
+  PlatformConnection
 } from '../../core/protocol/ump-types.ts';
 
 import { UMPParser, RestApiMessageRequest } from '../../core/protocol/ump-parser.ts';
 import { UMPFormatter } from '../../core/protocol/ump-formatter.ts';
+import { MessageRouter } from '../../core/message-router.ts';
 
 import {
   InterfaceModule,
@@ -56,10 +61,12 @@ export class RestInterfaceModule extends InterfaceModule {
   protected config: RestInterfaceConfig;
   private server?: Deno.HttpServer;
   private requestCounter = 0;
+  private messageRouter: MessageRouter;
 
-  constructor(config: RestInterfaceConfig) {
+  constructor(config: RestInterfaceConfig, messageRouter: MessageRouter) {
     super(config);
     this.config = config;
+    this.messageRouter = messageRouter;
   }
 
   /**
@@ -126,25 +133,31 @@ export class RestInterfaceModule extends InterfaceModule {
         connectionInfo?.sessionId
       );
 
-      // Create mock response for Phase 1 (will be connected to MessageRouter in Phase 2)
-      const response: UniversalResponse = {
-        id: `resp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        requestId: universalMessage.id,
-        timestamp: new Date(),
-        content: {
-          text: `REST API message processed: "${universalMessage.content.text}"`,
-          metadata: {
-            processed: true,
-            platform: Platform.REST_API,
-            originalMessage: universalMessage.content.text
-          }
+      // Create session object for MessageRouter
+      const now = new Date();
+      const session: Session = {
+        id: connectionInfo?.sessionId || `rest_session_${Date.now()}`,
+        userId: connectionInfo?.userId || `rest_user_${Date.now()}`,
+        platform: Platform.REST_API,
+        createdAt: now,
+        lastActiveAt: now,
+        state: SessionState.ACTIVE,
+        context: {
+          messageCount: 1,
+          lastMessageAt: now,
+          preferences: connectionInfo?.metadata || {}
         },
-        format: UMPFormatter.createOptimalResponseFormat(Platform.REST_API),
-        processing: {
-          processingTime: Date.now() - startTime,
-          confidence: 1.0
+        platformConnection: {
+          platform: Platform.REST_API,
+          connectionId: connectionInfo?.id || `rest_conn_${Date.now()}`,
+          isConnected: true,
+          lastPing: now,
+          metadata: connectionInfo?.metadata || {}
         }
       };
+
+      // Route through MessageRouter to get actual AI response
+      const response = await this.messageRouter.routeMessage(universalMessage, session);
 
       // Update metrics
       this.updateMetrics(true, Date.now() - startTime);
@@ -501,23 +514,21 @@ export class RestInterfaceModule extends InterfaceModule {
       }
     };
 
-    return new Response(
-      JSON.stringify(errorBody, null, 2),
-      { status, headers }
-    );
+    return new Response(JSON.stringify(errorBody, null, 2), {
+      status,
+      headers
+    });
   }
 
   /**
    * Validate REST message format
    */
   private isValidRestMessage(message: any): boolean {
-    return (
-      message &&
-      typeof message === 'object' &&
-      typeof message.message === 'string' &&
-      typeof message.userId === 'string' &&
-      message.message.trim().length > 0
-    );
+    return message &&
+           typeof message === 'object' &&
+           message.content &&
+           typeof message.content === 'string' &&
+           message.content.trim().length > 0;
   }
 }
 
@@ -525,11 +536,9 @@ export class RestInterfaceModule extends InterfaceModule {
  * Create default REST interface configuration
  */
 export function createDefaultRestInterfaceConfig(): RestInterfaceConfig {
-  const baseConfig = createDefaultInterfaceConfig(Platform.REST_API, 'RestInterface');
-
   return {
-    ...baseConfig,
-    port: 8001,
+    ...createDefaultInterfaceConfig(Platform.REST_API, 'REST API Interface'),
+    port: 8080,
     host: '0.0.0.0',
     apiVersion: 'v1',
     basePath: '/api/v1',
@@ -543,16 +552,14 @@ export function createDefaultRestInterfaceConfig(): RestInterfaceConfig {
 }
 
 /**
- * REST Interface Module factory
+ * REST Interface Factory
  */
 export class RestInterfaceFactory {
-  /**
-   * Create REST Interface Module
-   */
-  static create(config?: Partial<RestInterfaceConfig>): RestInterfaceModule {
-    const defaultConfig = createDefaultRestInterfaceConfig();
-    const finalConfig = { ...defaultConfig, ...config };
-
-    return new RestInterfaceModule(finalConfig);
+  static create(config?: Partial<RestInterfaceConfig>, messageRouter?: MessageRouter): RestInterfaceModule {
+    const fullConfig = { ...createDefaultRestInterfaceConfig(), ...config };
+    if (!messageRouter) {
+      throw new Error('MessageRouter is required for RestInterfaceModule');
+    }
+    return new RestInterfaceModule(fullConfig, messageRouter);
   }
 }

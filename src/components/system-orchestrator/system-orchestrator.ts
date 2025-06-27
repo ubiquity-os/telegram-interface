@@ -308,30 +308,31 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     return MessagePriorityEnum.NORMAL;
   }
 
-  async handleUpdate(update: TelegramUpdate): Promise<void> {
+  async handleUpdate(update: TelegramUpdate): Promise<string> {
     // If message queue is enabled, enqueue the message
     if (this.messageQueue) {
       try {
         const priority = this.determineMessagePriority(update);
         const messageId = await this.messageQueue.enqueue(update, priority);
         console.log(`[SystemOrchestrator] Message enqueued with ID: ${messageId}, priority: ${MessagePriorityEnum[priority]}`);
+        return "Message queued for processing";
       } catch (error) {
         console.error('[SystemOrchestrator] Failed to enqueue message:', error);
         // Fall back to direct processing
         const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        await this.processUpdate(update, requestId);
+        return await this.processUpdate(update, requestId);
       }
     } else {
       // Direct processing without queue
       const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      await this.processUpdate(update, requestId);
+      return await this.processUpdate(update, requestId);
     }
   }
 
   /**
    * Process an update (either directly or from the queue)
    */
-  private async processUpdate(update: TelegramUpdate, requestId: string): Promise<void> {
+  private async processUpdate(update: TelegramUpdate, requestId: string): Promise<string> {
     console.log(`=== ORCHESTRATOR CALLED ===`);
     console.log(`[SystemOrchestrator] Processing update ${requestId}`);
     console.log(`[SystemOrchestrator] Update content:`, JSON.stringify(update, null, 2));
@@ -362,7 +363,7 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       // Stage 1: Receiving message
       if (!update.message || !update.message.text) {
         console.log(`[SystemOrchestrator] Ignoring non-text update ${requestId}`);
-        return;
+        return "Non-text message ignored";
       }
 
       console.log(`[SystemOrchestrator] Processing text message: "${update.message.text}"`);
@@ -667,6 +668,9 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
       console.log(`[SystemOrchestrator] Completed processing update ${requestId}`);
 
+      // Return the actual AI-generated response content
+      return finalResponse.content;
+
     } catch (error) {
       console.error(`[SystemOrchestrator] Error processing update:`, error);
 
@@ -700,6 +704,9 @@ export class SystemOrchestrator implements ISystemOrchestrator {
           console.error('[SystemOrchestrator] Failed to send error response:', sendError);
         }
       }
+
+      // Return error message for REST API users
+      return this.errorHandler.getUserFriendlyMessage(error as Error);
     } finally {
       this.metrics.activeRequests--;
       this.flowTrackers.delete(requestId);

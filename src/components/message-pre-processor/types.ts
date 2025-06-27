@@ -38,6 +38,11 @@ export interface MessagePreProcessorConfig {
    * Confidence threshold for intent detection
    */
   confidenceThreshold: number;
+
+  /**
+   * Skip LLM service test during initialization (for development/testing)
+   */
+  skipLLMTest?: boolean;
 }
 
 /**

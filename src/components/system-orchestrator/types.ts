@@ -127,7 +127,7 @@ export interface ISystemOrchestrator {
   restart(): Promise<void>;
 
   // Request handling
-  handleUpdate(update: TelegramUpdate): Promise<void>;
+  handleUpdate(update: TelegramUpdate): Promise<string>;
 
   // Health monitoring
   getHealthStatus(): Promise<SystemHealthStatus>;

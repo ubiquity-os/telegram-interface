@@ -84,8 +84,12 @@ export class MessagePreProcessor implements IMessagePreProcessor {
     }
 
     try {
-      // Test LLM service connectivity
-      await this.testLLMService();
+      // Test LLM service connectivity (skip if configured)
+      if (!this.config.skipLLMTest) {
+        await this.testLLMService();
+      } else if (this.config.verbose) {
+        console.log('[MessagePreProcessor] Skipping LLM service test (development mode)');
+      }
 
       this.isInitialized = true;
       this.lastHealthCheck = new Date();

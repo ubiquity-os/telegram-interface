@@ -219,15 +219,15 @@ export class MessageRouter {
       try {
         // Use existing SystemOrchestrator.handleUpdate method
         // This is where the message enters the existing system
-        await this.systemOrchestrator.handleUpdate(platformMessage);
+        const actualResponse = await this.systemOrchestrator.handleUpdate(platformMessage);
 
-        // Since handleUpdate doesn't return a response (it's async),
-        // we need to simulate a successful processing result
+        // Return the actual response from the system
         return {
           success: true,
           processed: true,
           platform: originalMessage.platform,
-          sessionId: session.id
+          sessionId: session.id,
+          actualContent: actualResponse
         };
 
       } catch (error) {
@@ -253,17 +253,17 @@ export class MessageRouter {
   ): Promise<UniversalResponse> {
     const processingTime = Date.now() - startTime;
 
-    // Since the existing system doesn't return structured responses,
-    // we create a generic success response
+    // Use the actual response content from the system
     const response: UniversalResponse = {
       id: `resp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       requestId: originalMessage.id,
       timestamp: new Date(),
       content: {
-        text: "Message processed successfully through the system orchestrator.",
+        text: result.actualContent || "System processed the message successfully.",
         metadata: {
           originalPlatform: originalMessage.platform,
-          sessionId: originalMessage.sessionId
+          sessionId: originalMessage.sessionId,
+          processed: result.processed
         }
       },
       format: UMPFormatter.createOptimalResponseFormat(originalMessage.platform),
