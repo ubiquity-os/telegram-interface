@@ -26,37 +26,42 @@ console.info = createConsoleWrapper(originalConsole.info, 'info');
 
 ### Log Rotation Behavior
 
-The system implements **automatic log rotation** with POSIX timestamp separation:
+The system implements **automatic log rotation** with session-based file naming and enhanced tracing:
 
 **Rotation Triggers:**
 - System startup (`src/main.ts` and `src/core/start-api-server.ts`)
 - New message processing sessions (`src/core/message-router.ts`)
 
-**Timestamp Format:**
+**Session-Based Filename Format:**
 ```typescript
 const timestamp = Math.floor(Date.now() / 1000); // POSIX timestamp
-const rotatedFile = `logs/${timestamp}.log`;
+const sessionSuffix = generateSessionSuffix(); // e.g., "82j2ofsla"
+const rotatedFile = `logs/${timestamp}-${sessionSuffix}.log`;
 ```
 
 **Rotation Process:**
 1. Check if `logs/latest.log` exists
-2. Generate POSIX timestamp for current session
-3. Move `latest.log` → `logs/[timestamp].log`
+2. Generate POSIX timestamp and session suffix for current session
+3. Move `latest.log` → `logs/[timestamp]-[sessionSuffix].log`
 4. Create new `latest.log` for current session
+5. **Backward Compatibility**: Falls back to `logs/[timestamp].log` if session suffix unavailable
 
 ### File Structure and Organization
 
 ```
 logs/
-├── latest.log           # Current session log (active)
-├── 1751012156.log      # Previous session (timestamp)
-├── 1751012173.log      # Earlier session (timestamp)
-└── 1751012288.log      # Historical session (timestamp)
+├── latest.log                    # Current session log (active)
+├── 1751026088631-82j2ofsla.log  # Session with suffix (enhanced tracing)
+├── 1751026753.log               # Fallback without session (backward compatibility)
+├── 1751012156.log               # Earlier session (timestamp only)
+└── 1751012173-x8ka9dfj.log      # Historical session with suffix
 ```
 
 **File Descriptions:**
 - **`latest.log`**: Active logging for current session - real-time debugging
-- **`[timestamp].log`**: Historical sessions - analysis and pattern identification
+- **`[timestamp]-[sessionSuffix].log`**: Session-based logs with enhanced correlation capabilities
+- **`[timestamp].log`**: Backward compatible logs without session suffix
+- **Session Suffixes**: Random alphanumeric strings for unique session identification
 - **Timestamps**: POSIX format for chronological ordering and easy parsing
 
 ### Integration Points
@@ -159,21 +164,43 @@ grep "=== ORCHESTRATOR CALLED ===" logs/latest.log
 grep "req_[0-9]" logs/latest.log
 ```
 
-### Historical Analysis with Timestamped Logs
+### Historical Analysis with Session-Based Logs
 
 **Examining Previous Sessions:**
 ```bash
-# List all log files chronologically
+# List all log files chronologically (including session suffixes)
 ls -la logs/*.log | sort
 
-# Analyze specific session
-cat logs/1751012156.log | grep -i "error"
+# Analyze specific session with suffix
+cat logs/1751026088631-82j2ofsla.log | grep -i "error"
 
-# Compare sessions
-diff logs/1751012156.log logs/1751012173.log
+# Find logs for specific session suffix
+ls logs/*-82j2ofsla.log
+
+# Compare sessions (session-based vs timestamp-only)
+diff logs/1751026088631-82j2ofsla.log logs/1751026753.log
 
 # Search across multiple sessions
 grep -i "pattern" logs/*.log
+
+# Find all sessions with suffixes
+ls logs/*-*.log
+
+# Find all fallback sessions (timestamp only)
+ls logs/[0-9]*.log | grep -v "\-"
+```
+
+**Session Correlation Examples:**
+```bash
+# Correlate CLI session with log files
+grep "session_1751026088631_82j2ofsla" logs/latest.log
+ls logs/1751026088631-82j2ofsla.log
+
+# Find sessions by time range
+ls logs/175102[6-7]*.log
+
+# Session pattern analysis
+grep -o "\-[a-z0-9]*\.log" logs/*.log | sort | uniq -c
 ```
 
 ## C. Testing & Debugging with cURL
@@ -303,6 +330,27 @@ curl -X POST http://localhost:8000/api/v1/messages \
 
 ### Log Correlation Techniques
 
+#### Session-Based Debugging Capabilities
+
+**Enhanced Session Tracing:**
+The session-based log rotation provides superior debugging capabilities:
+
+```bash
+# Find logs for specific session
+ls logs/*-82j2ofsla.log
+
+# Correlate CLI session with log files
+grep "session_1751026088631_82j2ofsla" logs/latest.log
+ls logs/1751026088631-82j2ofsla.log
+
+# Session timeline analysis
+ls -lt logs/*-82j2ofsla.log | head -10
+
+# Cross-session comparison for debugging patterns
+diff <(grep -i "error" logs/1751026088631-82j2ofsla.log) \
+     <(grep -i "error" logs/1751026753.log)
+```
+
 #### Correlating cURL Requests with Logs
 
 **1. Request Tracking:**
@@ -313,9 +361,14 @@ curl -X POST http://localhost:8000/api/v1/messages \
   -H "Content-Type: application/json" \
   -d '{"message": {"text": "track this request"}}'
 
-# Find corresponding log entries
+# Find corresponding log entries (session-aware)
 grep "track this request" logs/latest.log
 grep "$(date +%Y-%m-%d)" logs/latest.log | grep "track this request" -A 5 -B 5
+
+# Check for session correlation
+CURRENT_SESSION=$(ls -t logs/*-*.log | head -1 | sed 's/.*-\(.*\)\.log/\1/')
+echo "Current session: $CURRENT_SESSION"
+grep "track this request" logs/*-${CURRENT_SESSION}.log
 ```
 
 **2. Error Correlation:**
@@ -346,10 +399,10 @@ grep "performance test" logs/latest.log | grep -i "time\|ms\|duration"
 
 **Scenario:** User reports bot not responding to messages
 
-**Step-by-Step Debugging:**
+**Step-by-Step Debugging with Session Awareness:**
 
 ```bash
-# 1. Check if system is receiving messages
+# 1. Check if system is receiving messages (with session tracking)
 tail -f logs/latest.log &
 curl -X POST http://localhost:8000/api/v1/messages \
   -H "Content-Type: application/json" \
@@ -369,6 +422,14 @@ grep "Generated response" logs/latest.log | tail -1
 
 # 6. Look for any errors in the flow
 grep -i "error\|failed" logs/latest.log | tail -10
+
+# 7. Session-based correlation (NEW)
+# If debugging spans multiple sessions, check session-specific logs
+CURRENT_SESSION=$(ls -t logs/*-*.log 2>/dev/null | head -1 | sed 's/.*-\(.*\)\.log/\1/')
+if [ ! -z "$CURRENT_SESSION" ]; then
+  echo "Checking session-specific log: $CURRENT_SESSION"
+  grep "debug test" logs/*-${CURRENT_SESSION}.log
+fi
 ```
 
 ### 2. Performance Issue Debugging

@@ -70,9 +70,9 @@ export class MessageRouter {
   ): Promise<UniversalResponse> {
     const startTime = Date.now();
 
-    // Rotate log for new message session
+    // Rotate log for new message session with session ID
     try {
-      const rotatedFile = await rotateLog();
+      const rotatedFile = await rotateLog(session.id);
       if (rotatedFile) {
         this.log('info', `Rotated previous session log to: ${rotatedFile}`);
       }

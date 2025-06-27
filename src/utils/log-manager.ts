@@ -36,9 +36,25 @@ async function ensureLogsDirectory(): Promise<void> {
 }
 
 /**
- * Move latest.log to timestamped file (POSIX timestamp format)
+ * Extract session suffix from session ID
+ * Session format: session_1751026088631_82j2ofsla
+ * Returns the suffix part (e.g., "82j2ofsla")
  */
-export async function rotateLog(): Promise<string | null> {
+function extractSessionSuffix(sessionId: string): string | null {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return null;
+  }
+
+  // Match session format: session_{timestamp}_{suffix}
+  const match = sessionId.match(/^session_\d+_([a-zA-Z0-9]+)$/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Move latest.log to timestamped file with optional session suffix
+ * Format: timestamp.log or timestamp-sessionSuffix.log
+ */
+export async function rotateLog(sessionId?: string): Promise<string | null> {
   try {
     await ensureLogsDirectory();
 
@@ -55,12 +71,24 @@ export async function rotateLog(): Promise<string | null> {
 
     // Generate POSIX timestamp
     const timestamp = Math.floor(Date.now() / 1000);
-    const timestampedFile = `${LOGS_DIR}/${timestamp}.log`;
+
+    // Extract session suffix if provided
+    const sessionSuffix = sessionId ? extractSessionSuffix(sessionId) : null;
+
+    // Create filename: timestamp.log or timestamp-sessionSuffix.log
+    const filename = sessionSuffix
+      ? `${timestamp}-${sessionSuffix}.log`
+      : `${timestamp}.log`;
+    const timestampedFile = `${LOGS_DIR}/${filename}`;
 
     // Move latest.log to timestamped file synchronously to ensure no logs are mixed
     await Deno.rename(LATEST_LOG_FILE, timestampedFile);
 
-    console.log(`[LogManager] Rotated log to: ${timestampedFile}`);
+    if (sessionSuffix) {
+      console.log(`[LogManager] Rotated log to: ${timestampedFile} (session: ${sessionId})`);
+    } else {
+      console.log(`[LogManager] Rotated log to: ${timestampedFile}`);
+    }
     return timestampedFile;
   } catch (error) {
     console.error('[LogManager] Failed to rotate log:', error);

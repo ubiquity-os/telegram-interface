@@ -86,15 +86,27 @@
 - LOGGING SYSTEM IMPLEMENTED: Console override with file persistence and rotation - VERIFIED WORKING
 - Ready for Phase 4: Testing and Monitoring - No blocking issues
 
-### Logging System Patterns (NEW - June 2025)
+### Enhanced Session-Based Logging System Patterns (UPDATED - June 2025)
 - Console override pattern captures ALL console output to files without losing terminal display
+- ENHANCED: Session-based filename format: `timestamp-sessionSuffix.log` for improved tracing
+- Session correlation capabilities with unique session identifiers for superior debugging
+- Backward compatibility maintained for non-session logs (timestamp only format)
 - POSIX timestamp rotation (Math.floor(Date.now() / 1000)) for chronological log organization
 - Session-based rotation triggered by system startup and message processing
 - Dual output strategy: terminal for development + files for debugging/analysis
 - Autonomous debugging via logs/latest.log for current session analysis
-- Historical analysis via logs/[timestamp].log for cross-session investigation
+- ENHANCED: Historical analysis via logs/[timestamp]-[sessionSuffix].log for session correlation
+- ENHANCED: Cross-session debugging with session-aware commands and correlation
 - Non-blocking async file writes to prevent performance impact
 - Integration points: src/main.ts, src/core/start-api-server.ts, src/core/message-router.ts
+
+### Session-Based Debugging Workflow Patterns (NEW)
+- Use `ls logs/*-sessionSuffix.log` to find session-specific logs
+- Correlate CLI sessions with log files using session identifiers
+- Session timeline analysis for improved troubleshooting
+- Cross-session comparison for pattern identification
+- Fallback to timestamp-only logs when session suffix unavailable
+- Session correlation commands for enhanced debugging capabilities
 
 ### Known Project Evolution
 - Started as simple Telegram bot (Phase 1)
