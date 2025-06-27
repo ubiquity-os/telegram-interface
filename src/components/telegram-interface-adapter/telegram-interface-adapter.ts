@@ -13,6 +13,7 @@ import {
   TelegramMessage,
   TelegramResponse
 } from '../../interfaces/message-types.ts';
+import { IMessageInterface, GenericResponse } from '../../interfaces/message-interface.ts';
 import {
   TelegramInterfaceAdapterConfig,
   QueuedMessage,
@@ -23,7 +24,7 @@ import { createEventEmitter, SystemEventType } from '../../services/event-bus/in
 import { CircuitBreaker, CircuitOpenError } from '../../reliability/circuit-breaker.ts';
 import { getCircuitBreakerConfig } from '../../reliability/circuit-breaker-configs.ts';
 
-export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
+export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter, IMessageInterface {
   public readonly name = 'TelegramInterfaceAdapter';
 
   private bot: Bot | null = null;
@@ -194,7 +195,28 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
     };
   }
 
-  private async sendMessage(response: TelegramResponse): Promise<void> {
+  /**
+   * Public sendMessage method that implements IMessageInterface
+   * Converts GenericResponse to TelegramResponse format
+   */
+  async sendMessage(response: GenericResponse): Promise<void> {
+    console.log(`=== SENDING RESPONSE TO TELEGRAM ADAPTER ===`);
+    console.log(`[TelegramInterfaceAdapter] sendMessage called`);
+    console.log(`[TelegramInterfaceAdapter] Test mode enabled: ${this.config.testMode}`);
+
+    // Convert GenericResponse to TelegramResponse
+    const telegramResponse: TelegramResponse = {
+      chatId: typeof response.chatId === 'number' ? response.chatId : parseInt(response.chatId.toString(), 10),
+      text: response.text,
+      parseMode: response.metadata?.parseMode,
+      replyMarkup: response.metadata?.replyMarkup
+    };
+
+    // Call the internal Telegram-specific send method
+    await this.sendTelegramMessage(telegramResponse);
+  }
+
+  private async sendTelegramMessage(response: TelegramResponse): Promise<void> {
     console.log(`=== TELEGRAM ADAPTER SEND MESSAGE ===`);
     console.log(`[TelegramInterfaceAdapter] sendMessage called with:`, JSON.stringify(response, null, 2));
     console.log(`[TelegramInterfaceAdapter] Test mode enabled: ${this.config.testMode}`);
@@ -344,8 +366,10 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
           await this.sendMessage({
             chatId: queuedMessage.chatId,
             text: queuedMessage.text,
-            replyMarkup: queuedMessage.replyMarkup,
-            parseMode: queuedMessage.parseMode
+            metadata: {
+              replyMarkup: queuedMessage.replyMarkup,
+              parseMode: queuedMessage.parseMode
+            }
           });
         } catch (error) {
           console.error('Failed to send queued message:', error);

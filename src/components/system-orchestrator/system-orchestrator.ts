@@ -36,6 +36,8 @@ import type {
   ResponseContext
 } from '../../interfaces/component-interfaces.ts';
 
+import type { IMessageInterface, GenericResponse } from '../../interfaces/message-interface.ts';
+
 import {
   TelegramMessage,
   TelegramResponse,
@@ -106,7 +108,7 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   private messageQueue?: MessageQueue;
 
   // Component references - injected via constructor
-  private telegramAdapter: ITelegramInterfaceAdapter;
+  private messageInterface: IMessageInterface;
   private decisionEngine: IDecisionEngine;
   private contextManager: IContextManager;
   private errorHandler: IErrorHandler;
@@ -116,14 +118,14 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   private selfModerationEngine?: ISelfModerationEngine;
 
   constructor(
-    @inject(TYPES.TelegramInterfaceAdapter) telegramAdapter: ITelegramInterfaceAdapter,
+    @inject(TYPES.TelegramInterfaceAdapter) messageInterface: IMessageInterface,
     @inject(TYPES.MessagePreProcessor) messagePreProcessor: IMessagePreProcessor,
     @inject(TYPES.DecisionEngine) decisionEngine: IDecisionEngine,
     @inject(TYPES.ContextManager) contextManager: IContextManager,
     @inject(TYPES.ResponseGenerator) responseGenerator: IResponseGenerator,
     @inject(TYPES.ErrorHandler) errorHandler: IErrorHandler
   ) {
-    this.telegramAdapter = telegramAdapter;
+    this.messageInterface = messageInterface;
     this.messagePreProcessor = messagePreProcessor;
     this.decisionEngine = decisionEngine;
     this.contextManager = contextManager;
@@ -191,7 +193,7 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       { name: 'MessagePreProcessor', component: this.messagePreProcessor, required: true, order: 3 },
       { name: 'DecisionEngine', component: this.decisionEngine, required: true, order: 4 },
       { name: 'ResponseGenerator', component: this.responseGenerator, required: true, order: 5 },
-      { name: 'TelegramAdapter', component: this.telegramAdapter, required: true, order: 6 },
+      { name: 'MessageInterface', component: this.messageInterface, required: true, order: 6 },
     ];
 
     // Register each component
@@ -221,10 +223,11 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   private async setupComponentHandlers(): Promise<void> {
     console.log('[SystemOrchestrator] Setting up component handlers...');
 
-    // Subscribe to updates from telegram adapter
-    // Note: We'll need to add this method to the ITelegramInterfaceAdapter interface
-    if ('subscribe' in this.telegramAdapter) {
-      (this.telegramAdapter as any).subscribe(async (update: TelegramUpdate) => {
+    // Subscribe to updates from message interface
+    // Note: Platform-specific adapters handle their own subscription logic
+    // The SystemOrchestrator now works generically with any message interface
+    if ('subscribe' in this.messageInterface) {
+      (this.messageInterface as any).subscribe(async (update: TelegramUpdate) => {
         await this.handleUpdate(update);
       });
     }
@@ -680,19 +683,21 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       };
       await this.contextManager.addMessage(responseMessage);
 
-      console.log(`=== SENDING RESPONSE TO TELEGRAM ADAPTER ===`);
+      console.log(`=== SENDING RESPONSE TO MESSAGE INTERFACE ===`);
       console.log(`[SystemOrchestrator] Final response content: "${finalResponse.content}"`);
 
-      // Send response through Telegram adapter
-      const telegramResponse: TelegramResponse = {
-        chatId: telegramMessage.chatId,
+      // Send response through generic message interface
+      const genericResponse: GenericResponse = {
+        chatId: telegramMessage.chatId.toString(),
         text: finalResponse.content,
-        parseMode: 'Markdown'
+        metadata: {
+          parseMode: 'Markdown'
+        }
       };
 
-      console.log(`[SystemOrchestrator] Sending TelegramResponse:`, JSON.stringify(telegramResponse, null, 2));
-      await this.telegramAdapter.sendResponse(telegramResponse);
-      console.log(`[SystemOrchestrator] Response sent to TelegramInterfaceAdapter`);
+      console.log(`[SystemOrchestrator] Sending GenericResponse:`, JSON.stringify(genericResponse, null, 2));
+      await this.messageInterface.sendMessage(genericResponse);
+      console.log(`[SystemOrchestrator] Response sent to MessageInterface`);
 
       // Update metrics
       this.updateFlowStage(requestId, MessageFlowStage.COMPLETED);
@@ -755,11 +760,11 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       // Try to send error response to user
       if (requestContext.update.message?.chat?.id) {
         try {
-          const errorResponse: TelegramResponse = {
-            chatId: requestContext.update.message.chat.id,
+          const errorResponse: GenericResponse = {
+            chatId: requestContext.update.message.chat.id.toString(),
             text: this.errorHandler.getUserFriendlyMessage(error as Error)
           };
-          await this.telegramAdapter.sendResponse(errorResponse);
+          await this.messageInterface.sendMessage(errorResponse);
         } catch (sendError) {
           console.error('[SystemOrchestrator] Failed to send error response:', sendError);
         }

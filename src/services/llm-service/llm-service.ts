@@ -41,10 +41,12 @@ export class LlmService {
   // Fast reasoning models - run in parallel with Promise.race()
   private readonly reasoningModels = [
     "deepseek/deepseek-r1-0528:free",
+    "tngtech/deepseek-r1t-chimera:free",
+    "microsoft/mai-ds-r1:free",
     "deepseek/deepseek-r1-0528-qwen3-8b:free",
     "deepseek/deepseek-r1:free",
     "deepseek/deepseek-r1-distill-llama-70b:free",
-    "deepseek/deepseek-r1-distill-qwen-14b:free",
+    "deepseek/deepseek/deepseek-r1-distill-qwen-7b",
   ];
 
   // Regular chat models - fallback if reasoning fails
@@ -93,40 +95,37 @@ export class LlmService {
   ): Promise<LLMResponse> {
     const mergedConfig = { ...this.config, ...options };
 
-    console.log(`[LlmService] RACING reasoning models in parallel: ${this.reasoningModels.join(', ')}`);
+    // Race ALL models together (reasoning + chat models)
+    const allModels = [...this.reasoningModels, ...this.chatModels];
+    console.log(`[LlmService] RACING all models together: ${allModels.join(', ')}`);
 
-    // First, try reasoning models in parallel with Promise.race()
-    try {
-      const reasoningPromises = this.reasoningModels.map(model =>
-        this.tryModel(model, messages, mergedConfig)
-      );
+    const startTime = Date.now();
 
-      const startTime = Date.now();
-      const result = await Promise.race(reasoningPromises);
-      const totalTime = Date.now() - startTime;
+    // Create a promise that resolves with first success
+    const raceForSuccess = new Promise<LLMResponse>((resolve, reject) => {
+      let completedCount = 0;
+      let lastError: Error | null = null;
 
-      console.log(`[LlmService] PARALLEL SUCCESS: First reasoning model responded in ${totalTime}ms`);
-      return result;
-    } catch (error) {
-      console.warn(`[LlmService] All reasoning models failed, falling back to chat models`);
-    }
+      allModels.forEach(async (model) => {
+        try {
+          const result = await this.tryModel(model, messages, mergedConfig);
+          const totalTime = Date.now() - startTime;
+          console.log(`[LlmService] RACING SUCCESS: ${model} responded first in ${totalTime}ms`);
+          resolve(result);
+        } catch (error) {
+          completedCount++;
+          lastError = error as Error;
+          console.warn(`[LlmService] Model ${model} failed in race:`, (error as Error).message);
 
-    // Fallback: try chat models sequentially
-    console.log(`[LlmService] Fallback to chat models: ${this.chatModels.join(', ')}`);
-    let lastError: Error | null = null;
+          // If all models have failed, reject
+          if (completedCount === allModels.length) {
+            reject(lastError || new Error('All models failed'));
+          }
+        }
+      });
+    });
 
-    for (const model of this.chatModels) {
-      try {
-        return await this.tryModel(model, messages, mergedConfig);
-      } catch (error) {
-        console.warn(`[LlmService] Chat model ${model} failed:`, (error as Error).message);
-        lastError = error as Error;
-      }
-    }
-
-    // All models failed
-    console.error('[LlmService] All models failed. Last error:', lastError);
-    throw new Error(`Failed to generate LLM response with any model. Last error: ${lastError?.message || 'Unknown error'}`);
+    return await raceForSuccess;
   }
 
   private async tryModel(

@@ -19,11 +19,13 @@ import {
   IErrorHandler
 } from '../interfaces/component-interfaces.ts';
 
+import { IMessageInterface } from '../interfaces/message-interface.ts';
 import { ISystemOrchestrator } from '../components/system-orchestrator/types.ts';
 
 // Import implementations
 import { SystemOrchestrator } from '../components/system-orchestrator/system-orchestrator.ts';
 import { TelegramInterfaceAdapter } from '../components/telegram-interface-adapter/telegram-interface-adapter.ts';
+import { ApiResponseAdapter } from '../adapters/api-response-adapter.ts';
 import { MessagePreProcessor } from '../components/message-pre-processor/message-pre-processor.ts';
 import { DecisionEngine } from '../components/decision-engine/decision-engine.ts';
 import { CachedContextManager } from '../components/context-manager/cached-context-manager.ts';
@@ -150,6 +152,17 @@ export function createContainer(): Container {
   // Bind components
   container.bind<ITelegramInterfaceAdapter>(TYPES.TelegramInterfaceAdapter)
     .to(TelegramInterfaceAdapter)
+    .inSingletonScope();
+
+  // Bind the same TelegramInterfaceAdapter instance to the generic MessageInterface
+  // This allows SystemOrchestrator to use the generic interface
+  container.bind<IMessageInterface>(TYPES.MessageInterface)
+    .to(TelegramInterfaceAdapter)
+    .inSingletonScope();
+
+  // Bind ApiResponseAdapter for CLI/API requests
+  container.bind<IMessageInterface>(TYPES.ApiResponseAdapter)
+    .to(ApiResponseAdapter)
     .inSingletonScope();
 
   container.bind<IMessagePreProcessor>(TYPES.MessagePreProcessor)

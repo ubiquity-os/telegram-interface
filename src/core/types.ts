@@ -9,6 +9,8 @@ export const TYPES = {
   // Core Components
   SystemOrchestrator: Symbol.for('SystemOrchestrator'),
   TelegramInterfaceAdapter: Symbol.for('TelegramInterfaceAdapter'),
+  MessageInterface: Symbol.for('MessageInterface'),
+  ApiResponseAdapter: Symbol.for('ApiResponseAdapter'),
   MessagePreProcessor: Symbol.for('MessagePreProcessor'),
   DecisionEngine: Symbol.for('DecisionEngine'),
   ContextManager: Symbol.for('ContextManager'),
