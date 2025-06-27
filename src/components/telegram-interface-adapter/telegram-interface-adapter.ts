@@ -32,6 +32,9 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
   private eventEmitter: ReturnType<typeof createEventEmitter>;
   private isInitialized = false;
 
+  // Test mode - captures responses instead of sending to Telegram
+  private capturedResponses: Map<number, string> = new Map();
+
   constructor(config: TelegramInterfaceAdapterConfig) {
     this.config = config;
     this.eventEmitter = createEventEmitter('TelegramInterfaceAdapter');
@@ -178,6 +181,19 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
   }
 
   private async sendMessage(response: TelegramResponse): Promise<void> {
+    console.log(`=== TELEGRAM ADAPTER SEND MESSAGE ===`);
+    console.log(`[TelegramInterfaceAdapter] sendMessage called with:`, JSON.stringify(response, null, 2));
+    console.log(`[TelegramInterfaceAdapter] Test mode enabled: ${this.config.testMode}`);
+
+    // In test mode, capture the response instead of sending to Telegram
+    if (this.config.testMode) {
+      console.log(`[TelegramInterfaceAdapter] TEST MODE: Capturing response for chat ${response.chatId}`);
+      console.log(`[TelegramInterfaceAdapter] Response text: "${response.text}"`);
+      this.capturedResponses.set(response.chatId, response.text);
+      console.log(`[TelegramInterfaceAdapter] Response captured. Total captured responses: ${this.capturedResponses.size}`);
+      return;
+    }
+
     if (!this.bot) return;
 
     try {
@@ -366,6 +382,20 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
         this.deduplicationCache.delete(updateId);
       }
     }
+  }
+
+  // Test mode methods
+  setTestMode(enabled: boolean): void {
+    console.log(`[TelegramInterfaceAdapter] Setting test mode to: ${enabled}`);
+    this.config.testMode = enabled;
+  }
+
+  getCapturedResponse(chatId: number): string | undefined {
+    return this.capturedResponses.get(chatId);
+  }
+
+  clearCapturedResponses(): void {
+    this.capturedResponses.clear();
   }
 
   async shutdown(): Promise<void> {

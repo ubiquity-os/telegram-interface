@@ -332,6 +332,10 @@ export class SystemOrchestrator implements ISystemOrchestrator {
    * Process an update (either directly or from the queue)
    */
   private async processUpdate(update: TelegramUpdate, requestId: string): Promise<void> {
+    console.log(`=== ORCHESTRATOR CALLED ===`);
+    console.log(`[SystemOrchestrator] Processing update ${requestId}`);
+    console.log(`[SystemOrchestrator] Update content:`, JSON.stringify(update, null, 2));
+
     const requestContext: RequestContext = {
       requestId,
       update,
@@ -360,6 +364,8 @@ export class SystemOrchestrator implements ISystemOrchestrator {
         console.log(`[SystemOrchestrator] Ignoring non-text update ${requestId}`);
         return;
       }
+
+      console.log(`[SystemOrchestrator] Processing text message: "${update.message.text}"`);
 
       // Text is guaranteed to exist after the check above
       const messageText = update.message.text;
@@ -405,12 +411,15 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
       // Stage 4: Message Pre-Processing
       this.updateFlowStage(requestId, MessageFlowStage.PREPROCESSING);
+      console.log(`[SystemOrchestrator] Stage 4: Calling MessagePreProcessor.analyzeMessage()`);
 
       // Analyze the message using MessagePreProcessor
       const analysis = await this.messagePreProcessor.analyzeMessage(
         messageText,
         conversationContext
       );
+
+      console.log(`[SystemOrchestrator] MessagePreProcessor analysis result:`, JSON.stringify(analysis, null, 2));
 
       // Emit message analyzed event
       await this.eventEmitter.emit<MessageAnalyzedEvent>({
@@ -493,7 +502,13 @@ export class SystemOrchestrator implements ISystemOrchestrator {
           } : {})
         };
 
+        console.log(`=== CALLING RESPONSE GENERATOR ===`);
+        console.log(`[SystemOrchestrator] Calling responseGenerator.generateResponse() with context:`, JSON.stringify(responseContext, null, 2));
+
         const generatedResponse = await this.responseGenerator.generateResponse(responseContext);
+
+        console.log(`=== RESPONSE GENERATOR RETURNED ===`);
+        console.log(`[SystemOrchestrator] Generated response:`, JSON.stringify(generatedResponse, null, 2));
 
         // Emit response generated event
         await this.eventEmitter.emit<ResponseGeneratedEvent>({
@@ -630,6 +645,9 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       };
       await this.contextManager.addMessage(responseMessage);
 
+      console.log(`=== SENDING RESPONSE TO TELEGRAM ADAPTER ===`);
+      console.log(`[SystemOrchestrator] Final response content: "${finalResponse.content}"`);
+
       // Send response through Telegram adapter
       const telegramResponse: TelegramResponse = {
         chatId: telegramMessage.chatId,
@@ -637,7 +655,9 @@ export class SystemOrchestrator implements ISystemOrchestrator {
         parseMode: 'Markdown'
       };
 
+      console.log(`[SystemOrchestrator] Sending TelegramResponse:`, JSON.stringify(telegramResponse, null, 2));
       await this.telegramAdapter.sendResponse(telegramResponse);
+      console.log(`[SystemOrchestrator] Response sent to TelegramInterfaceAdapter`);
 
       // Update metrics
       this.updateFlowStage(requestId, MessageFlowStage.COMPLETED);

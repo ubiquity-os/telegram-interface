@@ -249,6 +249,8 @@ export class MessagePreProcessor implements IMessagePreProcessor {
     message: string,
     context?: ConversationContext
   ): Promise<MessageAnalysis> {
+    console.log(`[MessagePreProcessor] STARTING LLM ANALYSIS for message: "${message}"`);
+
     // Build prompts
     const systemPrompt = PromptBuilder.buildSystemPrompt();
     const userPrompt = PromptBuilder.buildUserPrompt({
@@ -258,7 +260,11 @@ export class MessagePreProcessor implements IMessagePreProcessor {
       availableTools: []
     });
 
+    console.log(`[MessagePreProcessor] Built prompts - System: ${systemPrompt.substring(0, 100)}...`);
+    console.log(`[MessagePreProcessor] Built prompts - User: ${userPrompt.substring(0, 100)}...`);
+
     // Call LLM service
+    console.log(`[MessagePreProcessor] Calling LLM service...`);
     const response = await this.llmService.getAiResponse({
       messages: [
         { role: 'system', content: systemPrompt },
@@ -266,11 +272,17 @@ export class MessagePreProcessor implements IMessagePreProcessor {
       ]
     });
 
+    console.log(`[MessagePreProcessor] LLM service returned: "${response}"`);
+
     // Parse and validate response
     const llmAnalysis = PromptBuilder.parseAnalysisResponse(response);
+    console.log(`[MessagePreProcessor] Parsed analysis:`, JSON.stringify(llmAnalysis, null, 2));
 
     // Convert to MessageAnalysis format
-    return this.convertToMessageAnalysis(llmAnalysis);
+    const result = this.convertToMessageAnalysis(llmAnalysis);
+    console.log(`[MessagePreProcessor] Final MessageAnalysis:`, JSON.stringify(result, null, 2));
+
+    return result;
   }
 
   /**

@@ -343,3 +343,15 @@ MIT - See LICENSE file for details.
 **📊 Performance**: Achieving all production targets (<2s response, >99.9% availability)
 **🏗️ Architecture**: Scalable, resilient, maintainable, and proven under test conditions
 **🔧 Deployment**: Ready for production rollout with comprehensive monitoring setup
+
+### Fallback LLMs
+
+0. deepseek/deepseek-r1-0528:free
+0. deepseek/deepseek-r1-0528-qwen3-8b:free
+0. deepseek/deepseek-r1:free
+0. deepseek/deepseek-r1-distill-llama-70b:free
+0. deepseek/deepseek-r1-distill-qwen-14b:free
+0. deepseek/deepseek-chat-v3-0324:free
+0. deepseek/deepseek-chat:free
+0. deepseek/deepseek-v3-base:free
+0. google/gemini-2.0-flash-exp:free

@@ -33,6 +33,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
   private isInitialized = false;
   private configs: MCPServerConfig[] = [];
   private lastHealthCheck = new Date();
+  private clientInstances = new Map<string, MCPStdioClient>();
 
   constructor(private errorHandler?: IErrorHandler) {
     console.log(`[MCPToolManager] Constructor called`);
@@ -50,100 +51,189 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
    * Initialize the component (IComponent interface)
    */
   async initialize(): Promise<void> {
-    console.log('[MCPToolManager] Initialize called with no configs');
-    this.lastHealthCheck = new Date();
+    if (this.isInitialized) {
+      throw new Error('MCPToolManager is already initialized');
+    }
+
+    console.log('[MCPToolManager] Initializing...');
+
+    try {
+      this.isInitialized = true;
+      this.lastHealthCheck = new Date();
+
+      console.log('[MCPToolManager] Initialized successfully');
+    } catch (error) {
+      throw new Error(`Failed to initialize MCPToolManager: ${error.message}`);
+    }
   }
 
   /**
-   * Initialize with configs (IMCPToolManager interface)
+   * Shutdown the component (IComponent interface)
    */
-  async initializeWithConfigs(configs: MCPServerConfig[]): Promise<void> {
-    console.log(`[MCPToolManager] Initializing with ${configs.length} server configs`);
-
-    if (this.isInitialized) {
-      console.log('[MCPToolManager] Already initialized');
+  async shutdown(): Promise<void> {
+    if (!this.isInitialized) {
       return;
     }
 
-    this.configs = configs;
+    console.log('[MCPToolManager] Shutting down...');
 
-    // Initialize connection pool for each server
-    for (const config of configs) {
-      if (!config.enabled) {
-        console.log(`[MCPToolManager] Skipping disabled server: ${config.name}`);
-        continue;
+    try {
+      // Shutdown all client instances
+      for (const client of this.clientInstances.values()) {
+        await client.disconnect();
       }
+      this.clientInstances.clear();
 
+      // Shutdown connection pool
+      await this.connectionPool.closeAll();
+
+      this.isInitialized = false;
+
+      console.log('[MCPToolManager] Shutdown complete');
+    } catch (error) {
+      console.error('[MCPToolManager] Error during shutdown:', error);
+    }
+  }
+
+  /**
+   * Get component status (IComponent interface)
+   */
+  getStatus(): ComponentStatus {
+    return {
+      name: this.name,
+      status: this.isInitialized ? 'healthy' : 'unhealthy',
+      lastHealthCheck: this.lastHealthCheck,
+      metadata: {
+        serverCount: this.configs.length,
+        toolCount: this.toolRegistry.getAllTools().length,
+        poolStats: Object.fromEntries(this.connectionPool.getAllStats()),
+        circuitBreakerStates: Object.fromEntries(
+          Array.from(this.clientInstances.entries()).map(([serverId, client]) => [
+            serverId,
+            client.getCircuitBreakerStatus()
+          ])
+        )
+      }
+    };
+  }
+
+  /**
+   * Initialize with server configurations (IMCPToolManager interface)
+   */
+  async initializeWithConfigs(configs: MCPServerConfig[]): Promise<void> {
+    if (!this.isInitialized) {
+      throw new Error('MCPToolManager not initialized');
+    }
+
+    console.log(`[MCPToolManager] Initializing with ${configs.length} servers...`);
+
+    this.configs = [...configs];
+
+    for (const config of configs) {
       try {
-        console.log(`[MCPToolManager] Initializing server: ${config.name}`);
+        // Create client instance for this server
+        const client = new MCPStdioClient(config);
+        this.clientInstances.set(config.name, client);
+
+        // Initialize server in connection pool
         await this.connectionPool.initializeServer(config);
 
-        // Get a connection to discover tools
-        const connection = await this.connectionPool.acquire(config.name);
-        try {
-          // Initialize the client with config
-          const client = new MCPStdioClient(config);
-          await client.connect();
+        // Connect and get available tools
+        await client.connect();
+        const tools = await client.listTools();
 
-          // Get tools from the client
-          const tools = await client.listTools();
-          console.log(`[MCPToolManager] Discovered ${tools.length} tools from ${config.name}`);
-
-          // Register tools
-          for (const tool of tools) {
-            const toolDef: ToolDefinition = {
-              serverId: config.name,
-              name: tool.name,
-              description: tool.description || '',
-              inputSchema: tool.inputSchema
-            };
-            this.toolRegistry.registerTool(toolDef);
-          }
-
-          // Disconnect the temporary client
-          await client.disconnect();
-        } finally {
-          await this.connectionPool.release(connection.id);
+        // Register tools in our registry
+        for (const tool of tools) {
+          this.toolRegistry.registerTool({
+            serverId: config.name,
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema || {}
+          });
         }
+
+        console.log(`[MCPToolManager] Initialized server '${config.name}' with ${tools.length} tools`);
+
       } catch (error) {
-        console.error(`[MCPToolManager] Failed to initialize server ${config.name}:`, error);
+        console.error(`[MCPToolManager] Failed to initialize server '${config.name}':`, error);
+
+        // Handle error but don't fail the entire initialization
         if (this.errorHandler) {
           await this.errorHandler.handleError(error as Error, {
             component: this.name,
             operation: 'initializeWithConfigs',
-            metadata: { server: config.name }
-          });
+            serverId: config.name
+          } as ErrorContext);
         }
       }
     }
 
-    this.isInitialized = true;
-    this.lastHealthCheck = new Date();
-    console.log('[MCPToolManager] Initialization complete');
+    console.log('[MCPToolManager] Server initialization complete');
   }
 
   /**
-   * Get component status
+   * Register server configurations (backward compatibility)
    */
-  getStatus(): ComponentStatus {
-    const allStats = this.connectionPool.getAllStats();
-    const serverCount = allStats.size;
-    const connectedCount = Array.from(allStats.values())
-      .filter(stats => stats.activeConnections > 0).length;
+  async registerServers(configs: MCPServerConfig[]): Promise<void> {
+    return this.initializeWithConfigs(configs);
+  }
 
-    const isHealthy = this.isInitialized && connectedCount > 0;
+  /**
+   * Get available tools
+   */
+  async getAvailableTools(): Promise<ToolDefinition[]> {
+    if (!this.isInitialized) {
+      throw new Error('MCPToolManager not initialized');
+    }
 
-    return {
-      name: this.name,
-      status: isHealthy ? 'healthy' : this.isInitialized ? 'degraded' : 'unhealthy',
-      lastHealthCheck: this.lastHealthCheck,
-      metadata: {
-        initialized: this.isInitialized,
-        totalServers: serverCount,
-        connectedServers: connectedCount,
-        registeredTools: this.toolRegistry.getAllTools().length
+    return this.toolRegistry.getAllTools();
+  }
+
+  /**
+   * Get tool definition by ID
+   */
+  async getToolDefinition(toolId: string): Promise<ToolDefinition | null> {
+    if (!this.isInitialized) {
+      throw new Error('MCPToolManager not initialized');
+    }
+
+    return this.toolRegistry.getToolDefinition(toolId);
+  }
+
+  /**
+   * Refresh tool registry
+   */
+  async refreshToolRegistry(): Promise<void> {
+    if (!this.isInitialized) {
+      throw new Error('MCPToolManager not initialized');
+    }
+
+    console.log('[MCPToolManager] Refreshing tool registry...');
+
+    for (const [serverId, client] of this.clientInstances) {
+      try {
+        if (client.isConnected()) {
+          const tools = await client.listTools();
+
+          // Remove existing tools for this server
+          this.toolRegistry.removeServerTools(serverId);
+
+          // Re-register tools
+          for (const tool of tools) {
+            this.toolRegistry.registerTool({
+              serverId,
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema || {}
+            });
+          }
+        }
+      } catch (error) {
+        console.error(`[MCPToolManager] Failed to refresh tools for server '${serverId}':`, error);
       }
-    };
+    }
+
+    console.log('[MCPToolManager] Tool registry refresh complete');
   }
 
   /**
@@ -165,25 +255,29 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       throw new Error(`Tool ${call.toolId} does not belong to server ${call.serverId}`);
     }
 
+    // Check circuit breaker before executing
+    const circuitBreakerStatus = this.getCircuitBreakerStatus(call.serverId);
+    if (circuitBreakerStatus.state === CircuitBreakerState.OPEN) {
+      throw new Error(`Circuit breaker is open for server ${call.serverId}`);
+    }
+
     const startTime = Date.now();
-    const connection = await this.connectionPool.acquire(call.serverId);
 
     try {
-      // Create a temporary client for this connection
-      const config = this.configs.find(c => c.name === call.serverId);
-      if (!config) {
-        throw new Error(`Server configuration not found: ${call.serverId}`);
+      // Get client instance for this server
+      const client = this.clientInstances.get(call.serverId);
+      if (!client) {
+        throw new Error(`No client instance found for server: ${call.serverId}`);
       }
 
-      const client = new MCPStdioClient(config);
-      await client.connect();
-
+      // Execute the tool through the client
       const result = await client.callTool(tool.name, call.arguments);
-
-      await client.disconnect();
 
       const executionTime = Date.now() - startTime;
       console.log(`[MCPToolManager] Tool execution completed in ${executionTime}ms`);
+
+      // Update tool usage statistics
+      this.toolRegistry.updateToolUsage(call.toolId, executionTime);
 
       return {
         toolId: call.toolId,
@@ -193,153 +287,120 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       };
     } catch (error) {
       console.error(`[MCPToolManager] Tool execution failed:`, error);
+
       return {
         toolId: call.toolId,
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
         executionTime: Date.now() - startTime
       };
-    } finally {
-      await this.connectionPool.release(connection.id);
     }
   }
 
   /**
-   * Execute multiple tools
+   * Execute multiple tools in parallel
    */
   async executeMultipleTools(calls: ToolCall[]): Promise<ToolResult[]> {
-    return Promise.all(calls.map(call => this.executeTool(call)));
-  }
+    if (!this.isInitialized) {
+      throw new Error('MCP Tool Manager not initialized');
+    }
 
-  /**
-   * Get available tools
-   */
-  async getAvailableTools(): Promise<ToolDefinition[]> {
-    return this.toolRegistry.getAllTools();
-  }
+    console.log(`[MCPToolManager] Executing ${calls.length} tools in parallel`);
 
-  /**
-   * Get tool definition
-   */
-  async getToolDefinition(toolId: string): Promise<ToolDefinition | null> {
-    return this.toolRegistry.getToolDefinition(toolId);
-  }
-
-  /**
-   * Refresh tool registry
-   */
-  async refreshToolRegistry(): Promise<void> {
-    console.log('[MCPToolManager] Refreshing tool registry');
-
-    // Clear existing tools
-    this.toolRegistry = new ToolRegistry();
-
-    // Re-initialize with current configs
-    await this.initializeWithConfigs(this.configs);
+    const promises = calls.map(call => this.executeTool(call));
+    return Promise.all(promises);
   }
 
   /**
    * Get server status
    */
   async getServerStatus(serverId: string): Promise<ServerStatus> {
-    const stats = this.connectionPool.getStats(serverId);
-    if (!stats) {
+    if (!this.isInitialized) {
+      throw new Error('MCPToolManager not initialized');
+    }
+
+    const client = this.clientInstances.get(serverId);
+    if (!client) {
       throw new Error(`Server '${serverId}' not found`);
     }
 
-    const toolCount = this.toolRegistry.getAllTools()
-      .filter(tool => tool.serverId === serverId).length;
-
-    return {
-      serverId,
-      status: stats.activeConnections > 0 ? 'connected' : 'disconnected',
-      toolCount,
-      responseTime: stats.averageWaitTime
-    };
+    return client.getStatus();
   }
 
   /**
    * Get all server statuses
    */
   async getAllServerStatuses(): Promise<ServerStatus[]> {
-    const allStats = this.connectionPool.getAllStats();
-    const results: ServerStatus[] = [];
-
-    for (const [serverId, stats] of allStats) {
-      const toolCount = this.toolRegistry.getAllTools()
-        .filter(tool => tool.serverId === serverId).length;
-
-      results.push({
-        serverId,
-        status: stats.activeConnections > 0 ? 'connected' : 'disconnected',
-        toolCount,
-        responseTime: stats.averageWaitTime
-      });
+    if (!this.isInitialized) {
+      throw new Error('MCPToolManager not initialized');
     }
 
-    return results;
+    const statuses: ServerStatus[] = [];
+
+    for (const [serverId, client] of this.clientInstances) {
+      try {
+        statuses.push(await client.getStatus());
+      } catch (error) {
+        console.error(`[MCPToolManager] Failed to get status for server '${serverId}':`, error);
+        // Set a default failed status
+        statuses.push({
+          serverId,
+          status: 'error',
+          lastConnected: undefined,
+          lastError: error instanceof Error ? error.message : 'Unknown error',
+          toolCount: 0
+        });
+      }
+    }
+
+    return statuses;
   }
 
   /**
-   * Get circuit breaker status for a server
+   * Get circuit breaker status for a server - REAL IMPLEMENTATION
    */
   getCircuitBreakerStatus(serverId: string): CircuitBreakerStatus {
-    // For now, return a default status since we can't easily get the circuit breaker
-    // status without holding a connection reference
-    // This would need to be refactored to track circuit breaker state at the pool level
-    const stats = this.connectionPool.getStats(serverId);
-    if (!stats) {
+    const client = this.clientInstances.get(serverId);
+    if (!client) {
       throw new Error(`Server '${serverId}' not found`);
     }
 
-    // Return a synthesized status based on pool statistics
-    const hasFailures = stats.failedRequests > 0;
-    const failureRate = stats.totalRequests > 0
-      ? stats.failedRequests / stats.totalRequests
-      : 0;
-
-    return {
-      state: failureRate > 0.5 ? CircuitBreakerState.OPEN : CircuitBreakerState.CLOSED,
-      failureCount: stats.failedRequests,
-      lastFailureTime: hasFailures ? new Date() : undefined
-    };
+    // Get real circuit breaker status from the client
+    return client.getCircuitBreakerStatus();
   }
 
   /**
    * Generate system prompt tools
    */
   generateSystemPromptTools(): string {
-    const tools = this.toolRegistry.getAllTools();
-    if (tools.length === 0) {
-      return 'No external tools available.';
+    if (!this.isInitialized) {
+      return 'MCP Tool Manager not initialized.';
     }
 
-    let prompt = 'Available external tools:\n\n';
-    for (const tool of tools) {
-      prompt += `- ${tool.name} (${tool.serverId}): ${tool.description}\n`;
-      if (tool.inputSchema) {
-        prompt += `  Input: ${JSON.stringify(tool.inputSchema, null, 2)}\n`;
-      }
-      prompt += '\n';
-    }
-
-    return prompt;
+    return this.toolRegistry.generateSystemPromptTools();
   }
 
   /**
-   * Shutdown the component
+   * Health check for all servers
    */
-  async shutdown(): Promise<void> {
-    console.log('[MCPToolManager] Shutting down');
-
+  async performHealthCheck(): Promise<Map<string, boolean>> {
     if (!this.isInitialized) {
-      return;
+      throw new Error('MCPToolManager not initialized');
     }
 
-    await this.connectionPool.closeAll();
-    this.toolRegistry = new ToolRegistry();
-    this.isInitialized = false;
+    const healthResults = new Map<string, boolean>();
 
-    console.log('[MCPToolManager] Shutdown complete');
+    for (const [serverId, client] of this.clientInstances) {
+      try {
+        const status = await client.getStatus();
+        healthResults.set(serverId, status.status === 'connected');
+      } catch (error) {
+        console.error(`[MCPToolManager] Health check failed for server '${serverId}':`, error);
+        healthResults.set(serverId, false);
+      }
+    }
+
+    this.lastHealthCheck = new Date();
+    return healthResults;
   }
 }

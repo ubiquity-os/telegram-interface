@@ -33,6 +33,7 @@ const llmServiceAdapter = new LLMServiceAdapter();
 const telegramConfig: TelegramInterfaceAdapterConfig = {
   botToken: config.botToken,
   maxMessageLength: 4096,
+  testMode: false, // Enable test mode for capturing responses instead of sending to Telegram
   rateLimits: {
     maxMessagesPerSecond: 30,
     maxMessagesPerMinute: 20 * 60,
@@ -169,6 +170,9 @@ await orchestrator.initialize(orchestratorConfig);
 
 console.log("System Orchestrator initialized successfully");
 
+// Export the orchestrator for use in handlers
+export { orchestrator as systemOrchestrator };
+
 // Subscribe to critical events
 eventBus.on(SystemEventType.ERROR_OCCURRED, (event) => {
   console.error(`System error from ${event.source}:`, event);
@@ -238,9 +242,104 @@ Deno.serve({
         });
       }
 
-      // Import and use the new test message handler
-      const { handleTestMessage } = await import("./handlers/test-message-handler.ts");
-      const result = await handleTestMessage(body);
+      console.log(`=== TEST ENDPOINT HIT ===`);
+      console.log(`[TEST ENDPOINT] Processing test message: "${body.text}" from user ${body.userId} in chat ${body.chatId}`);
+
+      // Enable test mode on telegram adapter
+      console.log(`[TEST ENDPOINT] Enabling test mode on TelegramInterfaceAdapter...`);
+      telegramAdapter.setTestMode(true);
+
+      // Clear any existing captured responses
+      telegramAdapter.clearCapturedResponses();
+      console.log(`[TEST ENDPOINT] Test mode enabled and responses cleared`);
+
+      // Create a proper TelegramUpdate object from the test input
+      const testUpdate = {
+        update_id: Date.now(), // Use timestamp as unique update ID
+        message: {
+          message_id: Date.now(),
+          date: Math.floor(Date.now() / 1000),
+          chat: {
+            id: parseInt(body.chatId),
+            type: "private"
+          },
+          from: {
+            id: parseInt(body.userId),
+            is_bot: false,
+            first_name: "Test User"
+          },
+          text: body.text
+        }
+      };
+
+      console.log(`[TEST ENDPOINT] Created TelegramUpdate:`, JSON.stringify(testUpdate, null, 2));
+
+      // Create a response capture mechanism
+      let capturedResponse: string | undefined = undefined;
+      let capturedError: Error | undefined = undefined;
+      let processingStartTime = Date.now();
+
+      // Process through the real system orchestrator with response capture
+      console.log(`[TEST ENDPOINT] Calling orchestrator.handleUpdate()...`);
+
+      try {
+        console.log(`[TEST ENDPOINT] BEFORE orchestrator.handleUpdate() - Test mode enabled, response will be captured`);
+
+        await orchestrator.handleUpdate(testUpdate);
+
+        console.log(`[TEST ENDPOINT] AFTER orchestrator.handleUpdate() - Message enqueued, waiting for processing to complete...`);
+
+        // Wait for response capture with polling (max 90 seconds for LLM processing)
+        const maxWaitTime = 90000; // 90 seconds
+        const pollInterval = 500; // Check every 500ms
+        let waitTime = 0;
+
+        while (waitTime < maxWaitTime) {
+          capturedResponse = telegramAdapter.getCapturedResponse(parseInt(body.chatId));
+
+          if (capturedResponse) {
+            console.log(`[TEST ENDPOINT] SUCCESS: Response captured after ${waitTime}ms: "${capturedResponse.substring(0, 100)}..."`);
+            break;
+          }
+
+          // Wait before next poll
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          waitTime += pollInterval;
+
+          if (waitTime % 2000 === 0) { // Log every 2 seconds
+            console.log(`[TEST ENDPOINT] Still waiting for response capture... (${waitTime}ms elapsed)`);
+          }
+        }
+
+        if (!capturedResponse) {
+          console.log(`[TEST ENDPOINT] TIMEOUT: No response captured after ${maxWaitTime}ms for chat ${body.chatId}`);
+        }
+
+      } catch (error) {
+        console.error(`[TEST ENDPOINT] ERROR during orchestrator.handleUpdate():`, error);
+        capturedError = error as Error;
+      } finally {
+        // Disable test mode after processing
+        telegramAdapter.setTestMode(false);
+        console.log(`[TEST ENDPOINT] Test mode disabled`);
+      }
+
+      const processingTime = Date.now() - processingStartTime;
+
+      // Return response with captured data
+      const result = {
+        success: !capturedError,
+        message: capturedError ? "Test message processing failed" : "Test message processed successfully with real LLM integration",
+        response: capturedResponse,
+        processingTime,
+        error: capturedError?.message,
+        testInput: body,
+        telegramUpdate: testUpdate,
+        timestamp: new Date().toISOString(),
+        note: "PROBLEM: This message was processed through SystemOrchestrator -> MessagePreProcessor (LLM) -> DecisionEngine -> ResponseGenerator, but the final response is sent via Telegram API calls that we cannot intercept in test mode."
+      };
+
+      console.log(`[TEST ENDPOINT] Real system processing complete, captured response:`, capturedResponse);
 
       return new Response(JSON.stringify(result, null, 2), {
         headers: { "Content-Type": "application/json" },
@@ -250,7 +349,7 @@ Deno.serve({
       console.error("Test message endpoint error:", error);
       return new Response(JSON.stringify({
         success: false,
-        error: "Failed to process test message",
+        error: "Failed to process test message through real system",
         details: error.message
       }), {
         status: 500,

@@ -151,6 +151,8 @@ export class DecisionEngine implements IDecisionEngine {
     const chatId = context.message.chatId;
 
     try {
+      console.log(`[DecisionEngine] makeDecision() STARTED - ChatId: ${chatId}, Initial state: ${this.stateMachine.getCurrentState(chatId)}`);
+
       // Update metrics
       this.metrics.totalDecisions++;
 
@@ -170,13 +172,19 @@ export class DecisionEngine implements IDecisionEngine {
       // Make the actual decision
       const decision = await this.analyzeAndDecide(context);
 
+      console.log(`[DecisionEngine] BEFORE TRANSITION - Current state: ${this.stateMachine.getCurrentState(chatId)}, Decision action: ${decision.action}`);
+
       // Transition based on decision
       if (decision.action === 'execute_tools') {
+        console.log(`[DecisionEngine] TRANSITIONING: ${this.stateMachine.getCurrentState(chatId)} -> TOOLS_REQUIRED`);
         this.stateMachine.transition(chatId, DecisionEvent.TOOLS_REQUIRED, {
           toolCount: decision.toolCalls?.length ?? 0
         });
+        console.log(`[DecisionEngine] AFTER TRANSITION: Current state is ${this.stateMachine.getCurrentState(chatId)}`);
       } else {
-        this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+        console.log(`[DecisionEngine] TRANSITIONING: ${this.stateMachine.getCurrentState(chatId)} -> RESPONSE_GENERATED`);
+        this.stateMachine.transition(chatId, DecisionEvent.RESPONSE_GENERATED);
+        console.log(`[DecisionEngine] AFTER TRANSITION: Current state is ${this.stateMachine.getCurrentState(chatId)}`);
       }
 
       // Update metrics

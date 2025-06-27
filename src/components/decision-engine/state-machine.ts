@@ -103,11 +103,17 @@ export class DecisionStateMachine {
     const validTransitions = DecisionStateMachine.transitions[currentState];
     const nextState = validTransitions?.[event];
 
+    console.log(`[StateMachine] TRANSITION ATTEMPT: ChatId=${chatId}, CurrentState=${currentState}, Event=${event}`);
+    console.log(`[StateMachine] Valid transitions from ${currentState}:`, Object.keys(validTransitions || {}));
+
     if (!nextState) {
+      console.log(`[StateMachine] INVALID TRANSITION: ${currentState} -> ${event}. Valid transitions: ${Object.keys(validTransitions || {}).join(', ')}`);
       throw new Error(
         `Invalid transition: ${currentState} -> ${event}. Valid transitions: ${Object.keys(validTransitions || {}).join(', ')}`
       );
     }
+
+    console.log(`[StateMachine] VALID TRANSITION: ${currentState} -> ${event} -> ${nextState}`);
 
     const context = this.contexts.get(chatId) ?? this.createContext(chatId);
     const transition: StateTransition = {

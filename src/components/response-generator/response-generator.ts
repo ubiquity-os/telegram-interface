@@ -129,29 +129,39 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
    * Generate a response based on the given context
    */
   async generateResponse(context: ResponseContext): Promise<GeneratedResponse> {
+    console.log(`=== RESPONSE GENERATOR CALLED ===`);
+    console.log(`[ResponseGenerator] generateResponse called with context:`, JSON.stringify(context, null, 2));
+
     const startTime = Date.now();
 
     try {
       // Determine response strategy
       const strategy = this.determineResponseStrategy(context);
+      console.log(`[ResponseGenerator] Determined strategy:`, JSON.stringify(strategy, null, 2));
 
       // Generate response content based on strategy
       let content: string;
 
       switch (strategy.type) {
         case 'tool_based':
+          console.log(`[ResponseGenerator] Using tool_based strategy`);
           content = await this.generateToolBasedResponse(context, strategy);
           break;
         case 'clarification':
+          console.log(`[ResponseGenerator] Using clarification strategy`);
           content = await this.generateClarificationResponse(context, strategy);
           break;
         case 'error':
+          console.log(`[ResponseGenerator] Using error strategy`);
           content = await this.generateErrorResponse(context, strategy);
           break;
         case 'direct':
         default:
+          console.log(`[ResponseGenerator] Using direct strategy`);
           content = await this.generateDirectResponse(context, strategy);
       }
+
+      console.log(`[ResponseGenerator] Generated content: "${content}"`);
 
       // Apply formatting
       content = this.applyFormatting(content, strategy);
@@ -401,6 +411,15 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
     context: ResponseContext,
     strategy: ResponseStrategy
   ): Promise<string> {
+    console.log(`=== LLM SERVICE CALLED ===`);
+    console.log(`[ResponseGenerator] generateDirectResponse called with context:`, {
+      originalMessage: context.originalMessage,
+      analysisIntent: context.analysis?.intent,
+      analysisConfidence: context.analysis?.confidence,
+      conversationHistoryLength: context.conversationHistory?.length || 0,
+      constraints: context.constraints
+    });
+
     // Build conversation history for context
     const messages: OpenRouterMessage[] = this.buildConversationContext(context);
 
@@ -410,18 +429,30 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
       content: context.originalMessage
     });
 
+    console.log(`[ResponseGenerator] Built messages for LLM:`, JSON.stringify(messages, null, 2));
+
     try {
+      console.log(`[ResponseGenerator] About to call llmService.getAiResponse()`);
       const response = await this.llmService.getAiResponse({ messages });
+      console.log(`[ResponseGenerator] LLM service returned: "${response}"`);
+      console.log(`[ResponseGenerator] Response length: ${response.length} characters`);
       return response;
     } catch (error) {
-      console.error('[ResponseGenerator] Error calling LLM:', error);
+      console.error('[ResponseGenerator] ERROR calling LLM:', error);
+      console.error('[ResponseGenerator] Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
 
       // Fallback to a simple response
       if (context.originalMessage.toLowerCase().includes('hello') ||
           context.originalMessage.toLowerCase().includes('hi')) {
+        console.log(`[ResponseGenerator] Using greeting fallback for: "${context.originalMessage}"`);
         return getRandomGreeting(this.config.responseTemplates?.greetings);
       }
 
+      console.log(`[ResponseGenerator] Using generic fallback response for: "${context.originalMessage}"`);
       return "I'm sorry, I couldn't process your request at the moment. Please try again.";
     }
   }

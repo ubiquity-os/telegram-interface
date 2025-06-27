@@ -33,6 +33,7 @@ export interface TelegramInterfaceAdapterConfig {
     processingInterval: number;
     maxRetries: number;
   };
+  testMode?: boolean; // For capturing responses instead of sending to Telegram
 }
 
 // Rate limit state
