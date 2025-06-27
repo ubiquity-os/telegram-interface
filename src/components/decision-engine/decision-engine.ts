@@ -2,14 +2,17 @@
  * Decision Engine implementation
  */
 
+import { injectable, inject } from 'npm:inversify@7.5.4';
+import { TYPES } from '../../core/types.ts';
 import { DecisionStateMachine, DecisionEvent } from './state-machine.ts';
 import {
   DecisionEngineConfig,
   ToolExecutionContext,
   DecisionMetrics
 } from './types.ts';
+import { StatePersistence, RedisStatePersistence, MemoryStatePersistence } from './state-persistence.ts';
 
-import {
+import type {
   IDecisionEngine,
   IContextManager,
   IErrorHandler,
@@ -33,18 +36,26 @@ import { createEventEmitter, SystemEventType } from '../../services/event-bus/in
 /**
  * Central orchestrator for request handling and decision flow
  */
+@injectable()
 export class DecisionEngine implements IDecisionEngine {
   public readonly name = 'DecisionEngine';
 
   private stateMachine: DecisionStateMachine;
   private config: DecisionEngineConfig;
-  private contextManager?: IContextManager;
-  private errorHandler?: IErrorHandler;
+  private contextManager: IContextManager;
+  private errorHandler: IErrorHandler;
   private metrics: DecisionMetrics;
   private isInitialized = false;
   private eventEmitter: ReturnType<typeof createEventEmitter>;
+  private statePersistence?: StatePersistence;
 
-  constructor(config?: Partial<DecisionEngineConfig>) {
+  constructor(
+    @inject(TYPES.ContextManager) contextManager: IContextManager,
+    @inject(TYPES.ErrorHandler) errorHandler: IErrorHandler,
+    config?: Partial<DecisionEngineConfig>
+  ) {
+    this.contextManager = contextManager;
+    this.errorHandler = errorHandler;
     this.config = {
       maxStateRetention: 1000,
       defaultTimeout: 30000,
@@ -75,6 +86,20 @@ export class DecisionEngine implements IDecisionEngine {
 
     // Initialize state machine
     this.stateMachine = new DecisionStateMachine();
+
+    // Initialize state persistence if enabled
+    if (this.config.enableStatePersistence) {
+      try {
+        // Try to use Redis persistence with Deno KV
+        const kv = await Deno.openKv();
+        this.statePersistence = new RedisStatePersistence(kv);
+        console.log('[DecisionEngine] Using Redis state persistence');
+      } catch (error) {
+        // Fall back to memory persistence if KV is not available
+        console.warn('[DecisionEngine] Failed to initialize Redis persistence, falling back to memory:', error);
+        this.statePersistence = new MemoryStatePersistence();
+      }
+    }
 
     // Reset metrics
     this.resetMetrics();
@@ -133,17 +158,6 @@ export class DecisionEngine implements IDecisionEngine {
   }
 
   /**
-   * Set dependencies
-   */
-  setContextManager(contextManager: IContextManager): void {
-    this.contextManager = contextManager;
-  }
-
-  setErrorHandler(errorHandler: IErrorHandler): void {
-    this.errorHandler = errorHandler;
-  }
-
-  /**
    * Make a decision based on the context
    */
   async makeDecision(context: DecisionContext): Promise<Decision> {
@@ -152,6 +166,23 @@ export class DecisionEngine implements IDecisionEngine {
 
     try {
       console.log(`[DecisionEngine] makeDecision() STARTED - ChatId: ${chatId}, Initial state: ${this.stateMachine.getCurrentState(chatId)}`);
+
+      // Load persisted state if available
+      if (this.statePersistence && !this.stateMachine.hasState(chatId)) {
+        const persistedState = await this.statePersistence.loadState(chatId);
+        if (persistedState) {
+          // Restore state to state machine
+          this.stateMachine.restoreState(chatId, persistedState);
+          if (this.config.debugMode) {
+            console.log(`[DecisionEngine] Restored persisted state for chat ${chatId}`);
+          }
+        }
+      }
+
+      // Ensure this chat has an active state
+      if (!this.stateMachine.hasState(chatId)) {
+        this.stateMachine.initializeChatState(chatId);
+      }
 
       // Update metrics
       this.metrics.totalDecisions++;
@@ -163,11 +194,21 @@ export class DecisionEngine implements IDecisionEngine {
         userId: context.message.userId
       });
 
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
+
       // Store the decision context in state data
       this.stateMachine.setStateData(chatId, 'decisionContext', context);
 
       // Transition to PREPROCESSING
       this.stateMachine.transition(chatId, DecisionEvent.ANALYSIS_COMPLETE);
+
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
 
       // Make the actual decision
       console.log(`[DecisionEngine] About to analyze and decide - Current state: ${this.stateMachine.getCurrentState(chatId)}`);
@@ -209,6 +250,11 @@ export class DecisionEngine implements IDecisionEngine {
         error: error.message
       });
 
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
+
       this.metrics.errorRate = this.calculateErrorRate();
 
       // Emit component error event
@@ -249,6 +295,18 @@ export class DecisionEngine implements IDecisionEngine {
   }
 
   /**
+   * Save current state to persistence
+   */
+  private async saveCurrentState(chatId: number): Promise<void> {
+    if (this.statePersistence) {
+      const context = this.stateMachine.getContext(chatId);
+      if (context) {
+        await this.statePersistence.saveState(chatId, context);
+      }
+    }
+  }
+
+  /**
    * Process tool execution results
    */
   async processToolResults(results: ToolResult[]): Promise<Decision> {
@@ -268,6 +326,11 @@ export class DecisionEngine implements IDecisionEngine {
         resultCount: results.length,
         successCount: results.filter(r => r.success).length
       });
+
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
 
       // Get the original decision context
       const originalContext = this.stateMachine.getStateData(chatId, 'decisionContext') as DecisionContext;
@@ -298,6 +361,11 @@ export class DecisionEngine implements IDecisionEngine {
         phase: 'tool_processing'
       });
 
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
+
       throw error;
     }
   }
@@ -313,6 +381,11 @@ export class DecisionEngine implements IDecisionEngine {
       error: error.message,
       context: context.message.messageId
     });
+
+    // Save state after transition
+    if (this.statePersistence) {
+      await this.saveCurrentState(chatId);
+    }
 
     // Use error handler if available
     if (this.errorHandler) {
@@ -404,6 +477,11 @@ export class DecisionEngine implements IDecisionEngine {
     this.stateMachine.transition(chatId, DecisionEvent.ANALYSIS_COMPLETE);
     console.log(`[DecisionEngine] Successfully transitioned to: ${this.stateMachine.getCurrentState(chatId)}`);
 
+    // Save state after transition
+    if (this.statePersistence) {
+      await this.saveCurrentState(chatId);
+    }
+
     // Apply decision rules based on intent
     console.log(`[DecisionEngine] Processing intent: ${analysis.intent} with confidence: ${analysis.confidence}`);
 
@@ -425,6 +503,12 @@ export class DecisionEngine implements IDecisionEngine {
           // Fallback for unknown intents - transition to direct response
           console.log(`[DecisionEngine] Unknown intent: ${analysis.intent}, using direct response`);
           this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+
+          // Save state after transition
+          if (this.statePersistence) {
+            await this.saveCurrentState(chatId);
+          }
+
           return this.createDirectResponseDecision(analysis, 'casual');
       }
     } catch (error) {
@@ -433,6 +517,12 @@ export class DecisionEngine implements IDecisionEngine {
         error: error.message,
         intent: analysis.intent
       });
+
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
+
       throw error;
     }
   }
@@ -453,6 +543,11 @@ export class DecisionEngine implements IDecisionEngine {
       this.stateMachine.transition(chatId, DecisionEvent.TOOLS_REQUIRED, {
         toolCount: matchingTools.length
       });
+
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
 
       // Emit decision made event for tool execution
       await this.eventEmitter.emit({
@@ -494,6 +589,12 @@ export class DecisionEngine implements IDecisionEngine {
 
     // No matching tools found - respond with available options
     this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+
+    // Save state after transition
+    if (this.statePersistence) {
+      await this.saveCurrentState(chatId);
+    }
+
     return {
       action: 'respond',
       responseStrategy: {
@@ -527,6 +628,11 @@ export class DecisionEngine implements IDecisionEngine {
           toolCount: matchingTools.length
         });
 
+        // Save state after transition
+        if (this.statePersistence) {
+          await this.saveCurrentState(chatId);
+        }
+
         return {
           action: 'execute_tools',
           toolCalls: matchingTools.map(toolId => ({
@@ -549,6 +655,12 @@ export class DecisionEngine implements IDecisionEngine {
 
     // Direct command execution without tools
     this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+
+    // Save state after transition
+    if (this.statePersistence) {
+      await this.saveCurrentState(chatId);
+    }
+
     return {
       action: 'respond',
       responseStrategy: {
@@ -585,6 +697,11 @@ export class DecisionEngine implements IDecisionEngine {
             relevance
           });
 
+          // Save state after transition
+          if (this.statePersistence) {
+            await this.saveCurrentState(chatId);
+          }
+
           return {
             action: 'execute_tools',
             toolCalls: matchingTools.map(toolId => ({
@@ -609,6 +726,12 @@ export class DecisionEngine implements IDecisionEngine {
 
     // Answer question directly
     this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+
+    // Save state after transition
+    if (this.statePersistence) {
+      await this.saveCurrentState(chatId);
+    }
+
     return {
       action: 'respond',
       responseStrategy: {
@@ -632,6 +755,11 @@ export class DecisionEngine implements IDecisionEngine {
     chatId: number
   ): Promise<Decision> {
     this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+
+    // Save state after transition
+    if (this.statePersistence) {
+      await this.saveCurrentState(chatId);
+    }
 
     return {
       action: 'respond',

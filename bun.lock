@@ -2,17 +2,27 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "devDependencies": {
-        "@types/node": "^24.0.3",
-        "deno-types": "^1.25.0",
+      "dependencies": {
+        "inversify": "^7.5.4",
+        "reflect-metadata": "^0.2.2",
       },
     },
   },
   "packages": {
-    "@types/node": ["@types/node@24.0.3", "", { "dependencies": { "undici-types": "~7.8.0" } }, "sha512-R4I/kzCYAdRLzfiCabn9hxWfbuHS573x+r0dJMkkzThEa7pbrcDWK+9zu3e7aBOouf+rQAciqPFMnxwr0aWgKg=="],
+    "@inversifyjs/common": ["@inversifyjs/common@1.5.2", "", {}, "sha512-WlzR9xGadABS9gtgZQ+luoZ8V6qm4Ii6RQfcfC9Ho2SOlE6ZuemFo7PKJvKI0ikm8cmKbU8hw5UK6E4qovH21w=="],
 
-    "deno-types": ["deno-types@1.25.0", "", {}, "sha512-O6nCW/DeVLVpMjr+jWKN+9ejnGm/qR9Mvb1jNO5NQzpPHgW7BkxKDSX7ssADy9yc31iy5pzd+cCCYEKKY/zA9g=="],
+    "@inversifyjs/container": ["@inversifyjs/container@1.10.3", "", { "dependencies": { "@inversifyjs/common": "1.5.2", "@inversifyjs/core": "5.3.3", "@inversifyjs/plugin": "0.2.0", "@inversifyjs/reflect-metadata-utils": "1.2.0" }, "peerDependencies": { "reflect-metadata": "~0.2.2" } }, "sha512-uuB6fNd3XeFBtsysJXqOt0G114M69EpQCfM2G2XnhNYUb/osnHNGeubl2sMHd6SO08HbtAD8yNQOkPpxKeQTEw=="],
 
-    "undici-types": ["undici-types@7.8.0", "", {}, "sha512-9UJ2xGDvQ43tYyVMpuHlsgApydB8ZKfVYTsLDhXkFL/6gfkp+U8xTGdh8pMJv1SpZna0zxG1DwsKZsreLbXBxw=="],
+    "@inversifyjs/core": ["@inversifyjs/core@5.3.3", "", { "dependencies": { "@inversifyjs/common": "1.5.2", "@inversifyjs/prototype-utils": "0.1.2", "@inversifyjs/reflect-metadata-utils": "1.2.0" } }, "sha512-sx7msHtmgu/7gNPTMN9TzeBiE7y9y3dCEbLgtY8JOLP7okRPrrjTl7w6pd5RY00s/AovdDoE7BscNZVjqWIR0A=="],
+
+    "@inversifyjs/plugin": ["@inversifyjs/plugin@0.2.0", "", {}, "sha512-R/JAdkTSD819pV1zi0HP54mWHyX+H2m8SxldXRgPQarS3ySV4KPyRdosWcfB8Se0JJZWZLHYiUNiS6JvMWSPjw=="],
+
+    "@inversifyjs/prototype-utils": ["@inversifyjs/prototype-utils@0.1.2", "", { "dependencies": { "@inversifyjs/common": "1.5.2" } }, "sha512-WZAEycwVd8zVCPCQ7GRzuQmjYF7X5zbjI9cGigDbBoTHJ8y5US9om00IAp0RYislO+fYkMzgcB2SnlIVIzyESA=="],
+
+    "@inversifyjs/reflect-metadata-utils": ["@inversifyjs/reflect-metadata-utils@1.2.0", "", { "peerDependencies": { "reflect-metadata": "0.2.2" } }, "sha512-EvXdBP+IjAZ3QKWFWGDzWLacyng9RMohtZ0c0EPUmvbaF4wgfwrE6n92ilt9aGwdbE5roGmDTmoRSmvavVOtIA=="],
+
+    "inversify": ["inversify@7.5.4", "", { "dependencies": { "@inversifyjs/common": "1.5.2", "@inversifyjs/container": "1.10.3", "@inversifyjs/core": "5.3.3" }, "peerDependencies": { "reflect-metadata": "~0.2.2" } }, "sha512-4UqlM8ALDzxsqQpK9ExQJAgnJoYhGJ88sr5v0ukwjpwIsE/ZKl9PyRtm9sWmViaHA4n2SergxC5sL3eeW+EWLQ=="],
+
+    "reflect-metadata": ["reflect-metadata@0.2.2", "", {}, "sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q=="],
   }
 }

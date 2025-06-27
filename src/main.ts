@@ -1,172 +1,28 @@
 import "std/dotenv/load.ts";
 import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
-import { eventBus, createEventEmitter, SystemEventType } from "./services/event-bus/index.ts";
-import { LlmService } from "./services/llm-service/index.ts";
-import { SimpleErrorHandler } from "./services/error-handler.ts";
+import { eventBus, SystemEventType } from "./services/event-bus/index.ts";
 
-// Import all components
-import { SystemOrchestrator } from "./components/system-orchestrator/index.ts";
-import { TelegramInterfaceAdapter } from "./components/telegram-interface-adapter/telegram-interface-adapter.ts";
-import { MessagePreProcessor } from "./components/message-pre-processor/index.ts";
-import { DecisionEngine } from "./components/decision-engine/decision-engine.ts";
-import { CachedContextManager, CachedContextManagerConfig } from "./components/context-manager/index.ts";
-import { ResponseGenerator } from "./components/response-generator/index.ts";
-import { KVContextStorage } from "./components/context-manager/kv-context-storage.ts";
-import { LLMServiceAdapter } from "./components/message-pre-processor/llm-service-adapter.ts";
+// Import DI container and bootstrap function
+import { bootstrap } from "./core/di-container.ts";
+import { TYPES } from "./core/types.ts";
 
 // Import types
-import { SystemOrchestratorConfig, ComponentDependencies } from "./components/system-orchestrator/types.ts";
-import { TelegramInterfaceAdapterConfig } from "./components/telegram-interface-adapter/types.ts";
-import { MessagePreProcessorConfig } from "./components/message-pre-processor/types.ts";
-import { DecisionEngineConfig } from "./components/decision-engine/types.ts";
-import { ResponseGeneratorConfig } from "./components/response-generator/types.ts";
+import { ISystemOrchestrator } from "./components/system-orchestrator/types.ts";
+import { ITelegramInterfaceAdapter } from "./interfaces/component-interfaces.ts";
 
 // Load config
 const config = await getConfig();
 
-// Create LLM service instance
-const llmService = new LlmService();
-const llmServiceAdapter = new LLMServiceAdapter();
-
-// Create component configurations
-const telegramConfig: TelegramInterfaceAdapterConfig = {
+// Bootstrap the system using the DI container
+console.log("Bootstrapping system with dependency injection...");
+const { container, orchestrator } = await bootstrap({
   botToken: config.botToken,
-  maxMessageLength: 4096,
-  testMode: false, // Enable test mode for capturing responses instead of sending to Telegram
-  rateLimits: {
-    maxMessagesPerSecond: 30,
-    maxMessagesPerMinute: 20 * 60,
-    maxMessagesPerHour: 1000 * 60
-  },
-  queueConfig: {
-    maxQueueSize: 100,
-    processingInterval: 100,
-    maxRetries: 3
-  }
-};
-
-const messagePreProcessorConfig: MessagePreProcessorConfig = {
-  maxCacheSize: 1000,
-  cacheTTL: 60 * 60 * 1000, // 1 hour
-  temperature: 0.7,
-  verbose: false,
-  confidenceThreshold: 0.8
-};
-
-const contextConfig: CachedContextManagerConfig = {
-  storage: {
-    type: 'deno-kv',
-    kvPath: undefined // Use default KV path
-  },
-  limits: {
-    maxConversationAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    maxMessagesPerChat: 100,
-    maxStorageSize: 1024 * 1024 * 1024 // 1GB
-  },
-  cleanup: {
-    enabled: true,
-    interval: 60 * 60 * 1000, // 1 hour
-    batchSize: 10
-  },
-  cache: {
-    maxSize: 100,
-    contextTTL: 30 * 60 * 1000, // 30 minutes
-    preferencesTTL: 60 * 60 * 1000, // 1 hour
-    enableMetrics: true
-  }
-};
-
-const responseGeneratorConfig: ResponseGeneratorConfig = {
-  maxResponseLength: 4000,
-  enableMarkdown: true,
-  temperature: 0.7,
-  maxButtonsPerRow: 3,
-  maxRows: 10
-};
-
-// Create context storage
-const contextStorage = new KVContextStorage();
-await contextStorage.initialize();
-
-// Create component instances
-const telegramAdapter = new TelegramInterfaceAdapter(telegramConfig);
-
-const messagePreProcessor = new MessagePreProcessor(
-  llmServiceAdapter,
-  messagePreProcessorConfig
-);
-
-const decisionEngine = new DecisionEngine({
-  maxStateRetention: 1000,
-  defaultTimeout: 30000,
-  enableStatePersistence: true,
-  debugMode: false
+  webhookSecret: config.webhookSecret
 });
 
-const contextManager = new CachedContextManager(
-  contextConfig,
-  contextStorage
-);
-
-const responseGenerator = new ResponseGenerator(
-  llmService,
-  responseGeneratorConfig
-);
-
-const errorHandler = new SimpleErrorHandler();
-
-// Initialize error handler first
-await errorHandler.initialize();
-
-// Initialize all components
-await telegramAdapter.initialize();
-await messagePreProcessor.initialize();
-await decisionEngine.initialize();
-await contextManager.initialize();
-await responseGenerator.initialize();
-
-// Create system orchestrator configuration
-const orchestratorConfig: SystemOrchestratorConfig = {
-  telegramConfig: {
-    botToken: config.botToken,
-    webhookSecret: config.webhookSecret
-  },
-  enableMCPTools: true,
-  enableSelfModeration: true,
-  enableErrorRecovery: true,
-  requestTimeout: 30000,
-  maxRetries: 3,
-  logLevel: 'info',
-  // Message queue configuration
-  messageQueue: {
-    workerConfig: {
-      minWorkers: 2,
-      maxWorkers: 10,
-      idleTimeout: 30000
-    },
-    retryConfig: {
-      maxRetries: 3,
-      initialDelay: 1000,
-      maxDelay: 30000,
-      multiplier: 2
-    }
-  }
-};
-
-// Create component dependencies
-const componentDependencies: ComponentDependencies = {
-  telegramAdapter,
-  messagePreProcessor,
-  decisionEngine,
-  contextManager,
-  responseGenerator,
-  errorHandler
-};
-
-// Initialize the system orchestrator with dependencies
-const orchestrator = new SystemOrchestrator(componentDependencies);
-await orchestrator.initialize(orchestratorConfig);
+// Get telegram adapter for test mode functionality
+const telegramAdapter = container.get<ITelegramInterfaceAdapter>(TYPES.TelegramInterfaceAdapter);
 
 console.log("System Orchestrator initialized successfully");
 
@@ -247,10 +103,12 @@ Deno.serve({
 
       // Enable test mode on telegram adapter
       console.log(`[TEST ENDPOINT] Enabling test mode on TelegramInterfaceAdapter...`);
-      telegramAdapter.setTestMode(true);
+      // Cast to implementation to access test mode methods
+      const telegramAdapterImpl = telegramAdapter as any;
+      telegramAdapterImpl.setTestMode(true);
 
       // Clear any existing captured responses
-      telegramAdapter.clearCapturedResponses();
+      telegramAdapterImpl.clearCapturedResponses();
       console.log(`[TEST ENDPOINT] Test mode enabled and responses cleared`);
 
       // Create a proper TelegramUpdate object from the test input
@@ -295,7 +153,7 @@ Deno.serve({
         let waitTime = 0;
 
         while (waitTime < maxWaitTime) {
-          capturedResponse = telegramAdapter.getCapturedResponse(parseInt(body.chatId));
+          capturedResponse = telegramAdapterImpl.getCapturedResponse(parseInt(body.chatId));
 
           if (capturedResponse) {
             console.log(`[TEST ENDPOINT] SUCCESS: Response captured after ${waitTime}ms: "${capturedResponse.substring(0, 100)}..."`);
@@ -320,7 +178,7 @@ Deno.serve({
         capturedError = error as Error;
       } finally {
         // Disable test mode after processing
-        telegramAdapter.setTestMode(false);
+        telegramAdapterImpl.setTestMode(false);
         console.log(`[TEST ENDPOINT] Test mode disabled`);
       }
 
@@ -498,25 +356,22 @@ Deno.serve({
       // This allows us to return 200 OK immediately
       processUpdateAsync(update);
 
-      // Return 200 OK immediately to acknowledge webhook
       return new Response("OK", { status: 200 });
-
     } catch (error) {
-      console.error("Webhook error:", error);
-      return new Response("Internal Server Error", { status: 500 });
+      console.error("Webhook processing error:", error);
+      return new Response("Error", { status: 500 });
     }
   }
 
-  // 404 for all other routes
   return new Response("Not Found", { status: 404 });
 });
 
-// Async function to process updates in the background
+// Process update asynchronously
 async function processUpdateAsync(update: any) {
   try {
-    // Let the orchestrator handle the update
     await orchestrator.handleUpdate(update);
   } catch (error) {
-    console.error("Error processing update asynchronously:", error);
+    console.error("Error processing update:", error);
+    // Error is already handled by the system orchestrator
   }
 }

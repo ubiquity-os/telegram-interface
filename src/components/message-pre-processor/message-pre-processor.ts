@@ -5,7 +5,10 @@
  * using LLM-based analysis with caching for performance optimization
  */
 
-import {
+import { injectable, inject } from 'npm:inversify@7.5.4';
+import { TYPES } from '../../core/types.ts';
+
+import type {
   IMessagePreProcessor,
   ComponentStatus
 } from '../../interfaces/component-interfaces.ts';
@@ -15,7 +18,7 @@ import {
   MessageAnalysis
 } from '../../interfaces/message-types.ts';
 
-import {
+import type {
   MessagePreProcessorConfig,
   CacheEntry,
   ExtendedMessageAnalysis,
@@ -38,6 +41,7 @@ import {
   createEventEmitter
 } from '../../services/event-bus/index.ts';
 
+@injectable()
 export class MessagePreProcessor implements IMessagePreProcessor {
   readonly name = 'MessagePreProcessor';
 
@@ -50,7 +54,7 @@ export class MessagePreProcessor implements IMessagePreProcessor {
   private eventEmitter = createEventEmitter('MessagePreProcessor');
 
   constructor(
-    llmService: ILLMService,
+    @inject(TYPES.LLMService) llmService: ILLMService,
     config?: Partial<MessagePreProcessorConfig>
   ) {
     this.llmService = llmService;

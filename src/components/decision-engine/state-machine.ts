@@ -236,6 +236,28 @@ export class DecisionStateMachine {
   }
 
   /**
+   * Check if state exists for a chat
+   */
+  hasState(chatId: number): boolean {
+    return this.contexts.has(chatId);
+  }
+
+  /**
+   * Initialize chat state to IDLE
+   */
+  initializeChatState(chatId: number): void {
+    const context = this.createContext(chatId);
+    this.contexts.set(chatId, context);
+  }
+
+  /**
+   * Restore state from persisted context
+   */
+  restoreState(chatId: number, context: StateMachineContext): void {
+    this.contexts.set(chatId, context);
+  }
+
+  /**
    * Create a new context for a chat
    */
   private createContext(chatId: number): StateMachineContext {

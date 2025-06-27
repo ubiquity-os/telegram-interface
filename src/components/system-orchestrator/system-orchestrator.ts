@@ -5,6 +5,8 @@
  * and manages the message flow through the system
  */
 
+import { injectable, inject } from 'npm:inversify@7.5.4';
+import { TYPES } from '../../core/types.ts';
 import {
   SystemOrchestratorConfig,
   ComponentDependencies,
@@ -18,7 +20,7 @@ import {
   FlowTracker
 } from './types.ts';
 
-import {
+import type {
   TelegramUpdate,
   ComponentStatus,
   ITelegramInterfaceAdapter,
@@ -87,6 +89,7 @@ import {
   QueueEvent
 } from '../../services/message-queue/index.ts';
 
+@injectable()
 export class SystemOrchestrator implements ISystemOrchestrator {
   private config!: SystemOrchestratorConfig;
   private components: Map<string, ManagedComponent> = new Map();
@@ -96,20 +99,34 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   private isInitialized = false;
   private eventEmitter = createEventEmitter('SystemOrchestrator');
 
-  // Component references - will be injected
-  private telegramAdapter!: ITelegramInterfaceAdapter;
-  private decisionEngine!: IDecisionEngine;
-  private contextManager!: IContextManager;
-  private errorHandler!: IErrorHandler;
-  private messagePreProcessor!: IMessagePreProcessor;
-  private responseGenerator!: IResponseGenerator;
-  private mcpToolManager?: IMCPToolManager;
-  private selfModerationEngine?: ISelfModerationEngine;
-
   // Message queue
   private messageQueue?: MessageQueue;
 
-  constructor(private dependencies: ComponentDependencies) {
+  // Component references - injected via constructor
+  private telegramAdapter: ITelegramInterfaceAdapter;
+  private decisionEngine: IDecisionEngine;
+  private contextManager: IContextManager;
+  private errorHandler: IErrorHandler;
+  private messagePreProcessor: IMessagePreProcessor;
+  private responseGenerator: IResponseGenerator;
+  private mcpToolManager?: IMCPToolManager;
+  private selfModerationEngine?: ISelfModerationEngine;
+
+  constructor(
+    @inject(TYPES.TelegramInterfaceAdapter) telegramAdapter: ITelegramInterfaceAdapter,
+    @inject(TYPES.MessagePreProcessor) messagePreProcessor: IMessagePreProcessor,
+    @inject(TYPES.DecisionEngine) decisionEngine: IDecisionEngine,
+    @inject(TYPES.ContextManager) contextManager: IContextManager,
+    @inject(TYPES.ResponseGenerator) responseGenerator: IResponseGenerator,
+    @inject(TYPES.ErrorHandler) errorHandler: IErrorHandler
+  ) {
+    this.telegramAdapter = telegramAdapter;
+    this.messagePreProcessor = messagePreProcessor;
+    this.decisionEngine = decisionEngine;
+    this.contextManager = contextManager;
+    this.responseGenerator = responseGenerator;
+    this.errorHandler = errorHandler;
+
     this.startTime = new Date();
     this.metrics = {
       totalRequests: 0,
@@ -163,16 +180,6 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
   private async initializeComponents(): Promise<void> {
     console.log('[SystemOrchestrator] Initializing components...');
-
-    // Use injected dependencies
-    this.errorHandler = this.dependencies.errorHandler;
-    this.contextManager = this.dependencies.contextManager;
-    this.messagePreProcessor = this.dependencies.messagePreProcessor;
-    this.decisionEngine = this.dependencies.decisionEngine;
-    this.responseGenerator = this.dependencies.responseGenerator;
-    this.telegramAdapter = this.dependencies.telegramAdapter;
-    this.mcpToolManager = this.dependencies.mcpToolManager;
-    this.selfModerationEngine = this.dependencies.selfModerationEngine;
 
     // Register core components that implement IComponent
     const componentsToRegister = [
@@ -677,12 +684,14 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       const finalState = await this.decisionEngine.getCurrentState(chatId);
       console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine final state for chat ${chatId}: ${finalState}`);
 
-      // CRITICAL FIX: Reset DecisionEngine state after successful processing
-      console.log(`[SystemOrchestrator] DIAGNOSTIC - Resetting DecisionEngine state for chat ${chatId}`);
-      this.decisionEngine.resetChatState(chatId);
-
-      const resetState = await this.decisionEngine.getCurrentState(chatId);
-      console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine state after reset for chat ${chatId}: ${resetState}`);
+      // Conditional reset logic - only reset on explicit commands or error recovery
+      const shouldReset = this.shouldResetState(telegramMessage);
+      if (shouldReset) {
+        console.log(`[SystemOrchestrator] Resetting DecisionEngine state for chat ${chatId} due to explicit command`);
+        this.decisionEngine.resetChatState(chatId);
+        const resetState = await this.decisionEngine.getCurrentState(chatId);
+        console.log(`[SystemOrchestrator] DecisionEngine state after reset for chat ${chatId}: ${resetState}`);
+      }
 
       // Return the actual AI-generated response content
       return finalResponse.content;
@@ -696,9 +705,11 @@ export class SystemOrchestrator implements ISystemOrchestrator {
         const errorState = await this.decisionEngine.getCurrentState(errorChatId);
         console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine state during error for chat ${errorChatId}: ${errorState}`);
 
-        // CRITICAL FIX: Reset DecisionEngine state even when errors occur
-        console.log(`[SystemOrchestrator] DIAGNOSTIC - Resetting DecisionEngine state after error for chat ${errorChatId}`);
-        this.decisionEngine.resetChatState(errorChatId);
+        // Only reset on critical errors that would corrupt state
+        if (this.isCriticalError(error)) {
+          console.log(`[SystemOrchestrator] Resetting DecisionEngine state after critical error for chat ${errorChatId}`);
+          this.decisionEngine.resetChatState(errorChatId);
+        }
       }
 
       // Emit error event
@@ -988,5 +999,41 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     console.log('[SystemOrchestrator] Restarting...');
     await this.shutdown();
     await this.initialize(this.config);
+  }
+
+  /**
+   * Determine if state should be reset based on message content
+   */
+  private shouldResetState(message: TelegramMessage): boolean {
+    const content = message.text?.toLowerCase() || '';
+
+    // Reset on explicit commands
+    if (content === '/reset' || content === '/clear' || content === '/start') {
+      return true;
+    }
+
+    // Don't reset for normal messages
+    return false;
+  }
+
+  /**
+   * Determine if an error is critical enough to require state reset
+   */
+  private isCriticalError(error: unknown): boolean {
+    if (error instanceof Error) {
+      // Critical errors that could corrupt state
+      const criticalPatterns = [
+        'state machine',
+        'invalid state',
+        'corrupted',
+        'inconsistent',
+        'deadlock'
+      ];
+
+      const errorMessage = error.message.toLowerCase();
+      return criticalPatterns.some(pattern => errorMessage.includes(pattern));
+    }
+
+    return false;
   }
 }

@@ -5,10 +5,12 @@
  * required by the MessagePreProcessor
  */
 
-import { ILLMService } from './types.ts';
+import { injectable } from 'npm:inversify@7.5.4';
+import type { ILLMService } from './types.ts';
 import { llmService } from '../../services/llm-service/llm-service.ts';
 import { OpenRouterMessage } from '../../services/openrouter-types.ts';
 
+@injectable()
 export class LLMServiceAdapter implements ILLMService {
   async getAiResponse(params: {
     messages: Array<{

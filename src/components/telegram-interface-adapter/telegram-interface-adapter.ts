@@ -1,5 +1,6 @@
 /**
  * Telegram Interface Adapter implementation
+ * Now includes circuit breaker protection against Telegram API failures
  */
 
 import { Bot } from "grammy";
@@ -19,6 +20,8 @@ import {
   DeduplicationEntry
 } from './types.ts';
 import { createEventEmitter, SystemEventType } from '../../services/event-bus/index.ts';
+import { CircuitBreaker, CircuitOpenError } from '../../reliability/circuit-breaker.ts';
+import { getCircuitBreakerConfig } from '../../reliability/circuit-breaker-configs.ts';
 
 export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
   public readonly name = 'TelegramInterfaceAdapter';
@@ -31,6 +34,7 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
   private processingInterval: number | null = null;
   private eventEmitter: ReturnType<typeof createEventEmitter>;
   private isInitialized = false;
+  private readonly circuitBreaker: CircuitBreaker<any>;
 
   // Test mode - captures responses instead of sending to Telegram
   private capturedResponses: Map<number, string> = new Map();
@@ -38,6 +42,12 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
   constructor(config: TelegramInterfaceAdapterConfig) {
     this.config = config;
     this.eventEmitter = createEventEmitter('TelegramInterfaceAdapter');
+
+    // Initialize circuit breaker with Telegram-specific configuration
+    this.circuitBreaker = new CircuitBreaker(
+      'telegram-api',
+      getCircuitBreakerConfig('telegram')
+    );
 
     // Initialize rate limit state
     const now = new Date();
@@ -49,6 +59,8 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
       lastResetMinute: now,
       lastResetHour: now,
     };
+
+    console.log(`[TelegramInterfaceAdapter] Circuit breaker initialized for Telegram API`);
   }
 
   async initialize(): Promise<void> {
@@ -160,7 +172,9 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
     }
 
     try {
-      await this.bot.api.sendChatAction(chatId, 'typing');
+      await this.circuitBreaker.call(async () => {
+        return await this.bot!.api.sendChatAction(chatId, 'typing');
+      });
     } catch (error) {
       console.error('Failed to send typing indicator:', error);
       // Don't throw - typing indicator is not critical
@@ -209,7 +223,9 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
           options.reply_markup = response.replyMarkup;
         }
 
-        await this.bot.api.sendMessage(response.chatId, chunk, options);
+        await this.circuitBreaker.call(async () => {
+          return await this.bot!.api.sendMessage(response.chatId, chunk, options);
+        });
 
         // Update rate limit counters
         this.incrementRateLimitCounters();
@@ -396,6 +412,17 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter {
 
   clearCapturedResponses(): void {
     this.capturedResponses.clear();
+  }
+
+  // Get circuit breaker status
+  getCircuitBreakerStatus() {
+    return this.circuitBreaker.getStatus();
+  }
+
+  // Reset circuit breaker
+  resetCircuitBreaker(): void {
+    this.circuitBreaker.reset();
+    console.log('[TelegramInterfaceAdapter] Circuit breaker reset');
   }
 
   async shutdown(): Promise<void> {

@@ -2,6 +2,7 @@
  * MCP Client Implementation
  *
  * Handles communication with external MCP servers using stdio transport
+ * Now includes unified circuit breaker protection
  */
 
 import {
@@ -11,12 +12,13 @@ import {
   MCPServerConfig,
   ServerStatus,
   CircuitBreakerState,
-  CircuitBreakerStatus,
-  CircuitBreakerConfig
+  CircuitBreakerStatus
 } from './types.ts';
 import { ProcessManager, ProcessHandle } from './process-manager.ts';
 import { StdioTransport } from './stdio-transport.ts';
 import { ProtocolHandler } from './protocol-handler.ts';
+import { CircuitBreaker } from '../../reliability/circuit-breaker.ts';
+import { getCircuitBreakerConfig } from '../../reliability/circuit-breaker-configs.ts';
 
 /**
  * MCP Client for stdio transport
@@ -27,21 +29,20 @@ export class MCPStdioClient implements IMCPClient {
   private transport: StdioTransport | null = null;
   private processHandle: ProcessHandle | null = null;
   private requestId = 0;
-  private circuitBreaker: CircuitBreakerStatus;
-  private readonly circuitBreakerConfig: CircuitBreakerConfig = {
-    failureThreshold: 5,
-    resetTimeout: 30000, // 30 seconds
-    halfOpenMaxCalls: 3
-  };
+  private readonly circuitBreaker: CircuitBreaker<any>;
   private lastResponseTime = 0;
   private connectedAt: Date | null = null;
 
   constructor(private config: MCPServerConfig) {
     console.log(`[MCPStdioClient] Creating client for ${this.config.name}`);
-    this.circuitBreaker = {
-      state: CircuitBreakerState.CLOSED,
-      failureCount: 0
-    };
+
+    // Initialize circuit breaker with MCP-specific configuration
+    this.circuitBreaker = new CircuitBreaker(
+      `mcp-${this.config.name}`,
+      getCircuitBreakerConfig('mcp')
+    );
+
+    console.log(`[MCPStdioClient] Circuit breaker initialized for MCP server ${this.config.name}`);
   }
 
   /**
@@ -55,15 +56,8 @@ export class MCPStdioClient implements IMCPClient {
       return;
     }
 
-    if (this.circuitBreaker.state === CircuitBreakerState.OPEN) {
-      if (this.circuitBreaker.nextRetryTime && Date.now() < this.circuitBreaker.nextRetryTime.getTime()) {
-        throw new Error(`Circuit breaker is open. Next retry at ${this.circuitBreaker.nextRetryTime}`);
-      }
-      // Transition to half-open state
-      this.circuitBreaker.state = CircuitBreakerState.HALF_OPEN;
-    }
-
-    try {
+    // Wrap connection logic in circuit breaker
+    await this.circuitBreaker.call(async () => {
       // Spawn the process
       this.processHandle = await this.processManager.spawnProcess(
         this.config.name,
@@ -86,20 +80,13 @@ export class MCPStdioClient implements IMCPClient {
       const protocolInfo = await this.protocolHandler.initialize();
       console.log(`[MCPStdioClient] Connected to ${this.config.name}, protocol version: ${protocolInfo.protocolVersion}`);
 
-      // Reset circuit breaker on successful connection
-      this.circuitBreaker.state = CircuitBreakerState.CLOSED;
-      this.circuitBreaker.failureCount = 0;
-      delete this.circuitBreaker.lastFailureTime;
-      delete this.circuitBreaker.nextRetryTime;
-
       this.connectedAt = new Date();
-
-    } catch (error) {
+      return protocolInfo;
+    }).catch(async (error) => {
       console.error(`[MCPStdioClient] Failed to connect to ${this.config.name}:`, error);
-      this.handleCircuitBreakerFailure();
       await this.cleanup();
       throw error;
-    }
+    });
   }
 
   /**
@@ -121,27 +108,13 @@ export class MCPStdioClient implements IMCPClient {
       throw new Error('Not connected to MCP server');
     }
 
-    if (this.circuitBreaker.state === CircuitBreakerState.OPEN) {
-      throw new Error('Circuit breaker is open');
-    }
-
-    try {
+    // Wrap request in circuit breaker
+    return await this.circuitBreaker.call(async () => {
       const startTime = Date.now();
-      const response = await this.protocolHandler.sendRequest(request, this.config.timeout);
+      const response = await this.protocolHandler!.sendRequest(request, this.config.timeout);
       this.lastResponseTime = Date.now() - startTime;
-
-      // Reset circuit breaker on successful request
-      if (this.circuitBreaker.state === CircuitBreakerState.HALF_OPEN) {
-        this.circuitBreaker.state = CircuitBreakerState.CLOSED;
-        this.circuitBreaker.failureCount = 0;
-      }
-
       return response;
-
-    } catch (error) {
-      this.handleCircuitBreakerFailure();
-      throw error;
-    }
+    });
   }
 
   /**
@@ -157,21 +130,33 @@ export class MCPStdioClient implements IMCPClient {
    * Get server status
    */
   getStatus(): ServerStatus {
+    const circuitBreakerStatus = this.circuitBreaker.getStatus();
+
     return {
       serverId: this.config.name,
       status: this.isConnected() ? 'connected' : 'disconnected',
       lastConnected: this.connectedAt || undefined,
-      lastError: this.circuitBreaker.lastFailureTime ? 'Circuit breaker failure' : undefined,
+      lastError: circuitBreakerStatus.state === 'open' ? 'Circuit breaker is open' : undefined,
       toolCount: 0, // Will be updated by tool manager
       responseTime: this.lastResponseTime
     };
   }
 
   /**
-   * Get circuit breaker status
+   * Get circuit breaker status - Convert to legacy format for compatibility
    */
   getCircuitBreakerStatus(): CircuitBreakerStatus {
-    return { ...this.circuitBreaker };
+    const status = this.circuitBreaker.getStatus();
+
+    // Convert our CircuitBreakerStatus to the legacy format expected by MCP types
+    return {
+      state: status.state === 'open' ? CircuitBreakerState.OPEN :
+             status.state === 'half-open' ? CircuitBreakerState.HALF_OPEN :
+             CircuitBreakerState.CLOSED,
+      failureCount: status.metrics.failedCalls,
+      lastFailureTime: status.metrics.lastFailureTime,
+      nextRetryTime: status.nextRetryTime
+    };
   }
 
   /**
@@ -188,7 +173,11 @@ export class MCPStdioClient implements IMCPClient {
     if (!this.protocolHandler) {
       throw new Error('Not connected to MCP server');
     }
-    return await this.protocolHandler.listTools();
+
+    // Wrap in circuit breaker
+    return await this.circuitBreaker.call(async () => {
+      return await this.protocolHandler!.listTools();
+    });
   }
 
   /**
@@ -198,7 +187,19 @@ export class MCPStdioClient implements IMCPClient {
     if (!this.protocolHandler) {
       throw new Error('Not connected to MCP server');
     }
-    return await this.protocolHandler.callTool(name, arguments_);
+
+    // Wrap in circuit breaker
+    return await this.circuitBreaker.call(async () => {
+      return await this.protocolHandler!.callTool(name, arguments_);
+    });
+  }
+
+  /**
+   * Reset circuit breaker
+   */
+  resetCircuitBreaker(): void {
+    this.circuitBreaker.reset();
+    console.log(`[MCPStdioClient] Circuit breaker reset for ${this.config.name}`);
   }
 
   /**
@@ -221,20 +222,6 @@ export class MCPStdioClient implements IMCPClient {
       }
     } catch (error) {
       console.error(`[MCPStdioClient] Error during cleanup:`, error);
-    }
-  }
-
-  /**
-   * Handle circuit breaker failure
-   */
-  private handleCircuitBreakerFailure(): void {
-    this.circuitBreaker.failureCount++;
-    this.circuitBreaker.lastFailureTime = new Date();
-
-    if (this.circuitBreaker.failureCount >= this.circuitBreakerConfig.failureThreshold) {
-      this.circuitBreaker.state = CircuitBreakerState.OPEN;
-      this.circuitBreaker.nextRetryTime = new Date(Date.now() + this.circuitBreakerConfig.resetTimeout);
-      console.log(`[MCPStdioClient] Circuit breaker opened for ${this.config.name}, will retry at ${this.circuitBreaker.nextRetryTime}`);
     }
   }
 }

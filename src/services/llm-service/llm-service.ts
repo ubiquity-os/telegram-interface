@@ -1,7 +1,11 @@
 /**
  * LLM Service
  * Handles communication with OpenRouter API for real LLM responses
+ * Now includes circuit breaker protection against API failures
  */
+
+import { CircuitBreaker, CircuitOpenError } from '../../reliability/circuit-breaker.ts';
+import { getCircuitBreakerConfig } from '../../reliability/circuit-breaker-configs.ts';
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant';
@@ -32,6 +36,7 @@ export class LlmService {
   private config: LLMConfig;
   private readonly apiKey: string;
   private readonly baseURL = 'https://openrouter.ai/api/v1/chat/completions';
+  private readonly circuitBreaker: CircuitBreaker<any>;
 
   // Fast reasoning models - run in parallel with Promise.race()
   private readonly reasoningModels = [
@@ -70,9 +75,16 @@ export class LlmService {
       throw new Error('OpenRouter API key is required. Set OPENROUTER_API_KEY environment variable.');
     }
 
+    // Initialize circuit breaker with LLM-specific configuration
+    this.circuitBreaker = new CircuitBreaker(
+      'llm-service',
+      getCircuitBreakerConfig('llm')
+    );
+
     console.log(`[LlmService] Initialized with API key: ${this.apiKey.substring(0, 20)}...`);
     console.log(`[LlmService] Default model: ${this.config.model}`);
     console.log(`[LlmService] Fallback models: ${this.config.fallbackModels?.slice(0, 3).join(', ')}...`);
+    console.log(`[LlmService] Circuit breaker initialized for LLM service`);
   }
 
   async generateResponse(
@@ -122,57 +134,61 @@ export class LlmService {
     messages: LLMMessage[],
     config: LLMConfig
   ): Promise<LLMResponse> {
-    const requestBody = {
-      model: model,
-      messages: messages,
-      temperature: config.temperature,
-      max_tokens: config.maxTokens,
-      stream: false
-    };
-
     console.log(`[LlmService] Trying model: ${model}`);
-    const startTime = Date.now();
 
-    const response = await fetch(this.baseURL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/ubiquity-os/telegram-interface',
-        'X-Title': 'Telegram Interface Bot'
-      },
-      body: JSON.stringify(requestBody)
+    // Wrap the API call in circuit breaker
+    return await this.circuitBreaker.call(async () => {
+      const requestBody = {
+        model: model,
+        messages: messages,
+        temperature: config.temperature,
+        max_tokens: config.maxTokens,
+        stream: false
+      };
+
+      const startTime = Date.now();
+
+      const response = await fetch(this.baseURL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/ubiquity-os/telegram-interface',
+          'X-Title': 'Telegram Interface Bot'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenRouter API error for ${model} (${response.status}): ${errorText}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.choices || data.choices.length === 0) {
+        throw new Error(`No response choices returned from ${model}`);
+      }
+
+      const choice = data.choices[0];
+      if (!choice.message || !choice.message.content) {
+        throw new Error(`Invalid response format from ${model}`);
+      }
+
+      const processingTime = Date.now() - startTime;
+      console.log(`[LlmService] SUCCESS: Model ${model} responded in ${processingTime}ms`);
+
+      return {
+        content: choice.message.content,
+        usage: data.usage ? {
+          promptTokens: data.usage.prompt_tokens,
+          completionTokens: data.usage.completion_tokens,
+          totalTokens: data.usage.total_tokens
+        } : undefined,
+        model: model,
+        processingTime
+      };
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`OpenRouter API error for ${model} (${response.status}): ${errorText}`);
-    }
-
-    const data = await response.json();
-
-    if (!data.choices || data.choices.length === 0) {
-      throw new Error(`No response choices returned from ${model}`);
-    }
-
-    const choice = data.choices[0];
-    if (!choice.message || !choice.message.content) {
-      throw new Error(`Invalid response format from ${model}`);
-    }
-
-    const processingTime = Date.now() - startTime;
-    console.log(`[LlmService] SUCCESS: Model ${model} responded in ${processingTime}ms`);
-
-    return {
-      content: choice.message.content,
-      usage: data.usage ? {
-        promptTokens: data.usage.prompt_tokens,
-        completionTokens: data.usage.completion_tokens,
-        totalTokens: data.usage.total_tokens
-      } : undefined,
-      model: model,
-      processingTime
-    };
   }
 
   async generateStreamResponse(
@@ -289,6 +305,17 @@ export class LlmService {
       console.error('[LlmService] Connection test failed:', error);
       return false;
     }
+  }
+
+  // Get circuit breaker status
+  getCircuitBreakerStatus() {
+    return this.circuitBreaker.getStatus();
+  }
+
+  // Reset circuit breaker
+  resetCircuitBreaker(): void {
+    this.circuitBreaker.reset();
+    console.log('[LlmService] Circuit breaker reset');
   }
 }
 
