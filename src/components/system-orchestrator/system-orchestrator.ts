@@ -368,6 +368,11 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
       console.log(`[SystemOrchestrator] Processing text message: "${update.message.text}"`);
 
+      // DIAGNOSTIC: Check DecisionEngine state before processing
+      const chatId = update.message.chat.id;
+      const initialState = await this.decisionEngine.getCurrentState(chatId);
+      console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine initial state for chat ${chatId}: ${initialState}`);
+
       // Text is guaranteed to exist after the check above
       const messageText = update.message.text;
 
@@ -668,11 +673,33 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
       console.log(`[SystemOrchestrator] Completed processing update ${requestId}`);
 
+      // DIAGNOSTIC: Check DecisionEngine state after processing
+      const finalState = await this.decisionEngine.getCurrentState(chatId);
+      console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine final state for chat ${chatId}: ${finalState}`);
+
+      // CRITICAL FIX: Reset DecisionEngine state after successful processing
+      console.log(`[SystemOrchestrator] DIAGNOSTIC - Resetting DecisionEngine state for chat ${chatId}`);
+      this.decisionEngine.resetChatState(chatId);
+
+      const resetState = await this.decisionEngine.getCurrentState(chatId);
+      console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine state after reset for chat ${chatId}: ${resetState}`);
+
       // Return the actual AI-generated response content
       return finalResponse.content;
 
     } catch (error) {
       console.error(`[SystemOrchestrator] Error processing update:`, error);
+
+      // DIAGNOSTIC: Track error details and state
+      const errorChatId = requestContext.update.message?.chat?.id;
+      if (errorChatId) {
+        const errorState = await this.decisionEngine.getCurrentState(errorChatId);
+        console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine state during error for chat ${errorChatId}: ${errorState}`);
+
+        // CRITICAL FIX: Reset DecisionEngine state even when errors occur
+        console.log(`[SystemOrchestrator] DIAGNOSTIC - Resetting DecisionEngine state after error for chat ${errorChatId}`);
+        this.decisionEngine.resetChatState(errorChatId);
+      }
 
       // Emit error event
       await this.eventEmitter.emit<ErrorOccurredEvent>({

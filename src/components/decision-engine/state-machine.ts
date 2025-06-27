@@ -38,38 +38,46 @@ export class DecisionStateMachine {
    */
   private static readonly transitions: Record<DecisionState, Partial<Record<DecisionEvent, DecisionState>>> = {
     [DecisionState.IDLE]: {
-      [DecisionEvent.MESSAGE_RECEIVED]: DecisionState.MESSAGE_RECEIVED
+      [DecisionEvent.MESSAGE_RECEIVED]: DecisionState.MESSAGE_RECEIVED,
+      [DecisionEvent.RESET]: DecisionState.IDLE
     },
     [DecisionState.MESSAGE_RECEIVED]: {
       [DecisionEvent.ANALYSIS_COMPLETE]: DecisionState.PREPROCESSING,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR
+      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
+      [DecisionEvent.RESET]: DecisionState.IDLE
     },
     [DecisionState.PREPROCESSING]: {
       [DecisionEvent.ANALYSIS_COMPLETE]: DecisionState.DECISION_POINT,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR
+      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
+      [DecisionEvent.RESET]: DecisionState.IDLE
     },
     [DecisionState.DECISION_POINT]: {
       [DecisionEvent.TOOLS_REQUIRED]: DecisionState.TOOL_REQUIRED,
       [DecisionEvent.DIRECT_RESPONSE]: DecisionState.DIRECT_RESPONSE,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR
+      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
+      [DecisionEvent.RESET]: DecisionState.IDLE
     },
     [DecisionState.TOOL_REQUIRED]: {
       [DecisionEvent.TOOLS_COMPLETE]: DecisionState.RESPONSE_GENERATION,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR
+      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
+      [DecisionEvent.RESET]: DecisionState.IDLE
     },
     [DecisionState.DIRECT_RESPONSE]: {
       [DecisionEvent.RESPONSE_GENERATED]: DecisionState.RESPONSE_GENERATION,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR
+      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
+      [DecisionEvent.RESET]: DecisionState.IDLE
     },
     [DecisionState.RESPONSE_GENERATION]: {
       [DecisionEvent.VALIDATION_PASSED]: DecisionState.VALIDATION,
       [DecisionEvent.VALIDATION_FAILED]: DecisionState.RESPONSE_GENERATION,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR
+      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
+      [DecisionEvent.RESET]: DecisionState.IDLE
     },
     [DecisionState.VALIDATION]: {
       [DecisionEvent.VALIDATION_PASSED]: DecisionState.SEND_RESPONSE,
       [DecisionEvent.VALIDATION_FAILED]: DecisionState.RESPONSE_GENERATION,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR
+      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
+      [DecisionEvent.RESET]: DecisionState.IDLE
     },
     [DecisionState.SEND_RESPONSE]: {
       [DecisionEvent.RESET]: DecisionState.IDLE,

@@ -4,10 +4,15 @@
  * Updated to use real SystemOrchestrator instead of mock
  */
 
+import { load } from "std/dotenv/mod.ts";
 import { CoreApiServer, createDefaultCoreApiServerConfig } from './api-server.ts';
 import { MessageRouter, createDefaultMessageRouterConfig } from './message-router.ts';
 import { SessionManager, createDefaultSessionManagerConfig } from './session-manager.ts';
 import { createSystemOrchestrator } from './component-factory.ts';
+
+// Load .env file at startup
+await load({ export: true });
+console.log('[StartupScript] .env file loaded');
 
 /**
  * Main startup function

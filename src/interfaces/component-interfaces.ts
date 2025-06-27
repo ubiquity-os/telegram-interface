@@ -218,6 +218,7 @@ export interface IDecisionEngine extends IComponent {
   // State management
   getCurrentState(chatId: number): Promise<DecisionState>;
   transitionTo(chatId: number, state: DecisionState): Promise<void>;
+  resetChatState(chatId: number): void;
 }
 
 /**
