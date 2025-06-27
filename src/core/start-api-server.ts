@@ -10,9 +10,16 @@ import { MessageRouter, createDefaultMessageRouterConfig } from './message-route
 import { SessionManager, createDefaultSessionManagerConfig } from './session-manager.ts';
 import { createSystemOrchestrator } from './component-factory.ts';
 
+// Import logging system
+import { initializeLogging } from '../utils/log-manager.ts';
+
 // Load .env file at startup
 await load({ export: true });
 console.log('[StartupScript] .env file loaded');
+
+// Initialize logging system early
+console.log('[StartupScript] Initializing logging system...');
+await initializeLogging();
 
 /**
  * Main startup function

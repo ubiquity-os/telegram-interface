@@ -3,9 +3,7 @@
   "packages": {
     "specifiers": {
       "npm:inversify@7.5.4": "npm:inversify@7.5.4_reflect-metadata@0.2.2",
-      "npm:inversify@^7.5.4": "npm:inversify@7.5.4_reflect-metadata@0.2.2",
-      "npm:reflect-metadata@0.2.2": "npm:reflect-metadata@0.2.2",
-      "npm:reflect-metadata@^0.2.2": "npm:reflect-metadata@0.2.2"
+      "npm:reflect-metadata@0.2.2": "npm:reflect-metadata@0.2.2"
     },
     "npm": {
       "@inversifyjs/common@1.5.2": {
@@ -152,13 +150,5 @@
     "https://deno.land/x/grammy_types@v3.5.2/payment.ts": "d23e9038c5b479b606e620dd84e3e67b6642ada110a962f2d5b5286e99ec7de5",
     "https://deno.land/x/grammy_types@v3.5.2/settings.ts": "5e989f5bd6c587d55673bd8052293869aa2f372e9223dd7f6e28632bfe021b6e",
     "https://deno.land/x/grammy_types@v3.5.2/update.ts": "a9fe07b677235a0d29e371f7fdc57ebf46b248ce956a2d918ed844a3c0fbe5de"
-  },
-  "workspace": {
-    "packageJson": {
-      "dependencies": [
-        "npm:inversify@^7.5.4",
-        "npm:reflect-metadata@^0.2.2"
-      ]
-    }
   }
 }

@@ -1,7 +1,10 @@
-import "std/dotenv/load.ts";
+// Bun automatically imports .env files, no dotenv needed
 import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
 import { eventBus, SystemEventType } from "./services/event-bus/index.ts";
+
+// Import logging system
+import { initializeLogging } from "./utils/log-manager.ts";
 
 // Import DI container and bootstrap function
 import { bootstrap } from "./core/di-container.ts";
@@ -13,6 +16,10 @@ import { ITelegramInterfaceAdapter } from "./interfaces/component-interfaces.ts"
 
 // Load config
 const config = await getConfig();
+
+// Initialize logging system early in the bootstrap process
+console.log("Initializing logging system...");
+await initializeLogging();
 
 // Bootstrap the system using the DI container
 console.log("Bootstrapping system with dependency injection...");

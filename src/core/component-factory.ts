@@ -193,7 +193,10 @@ export async function createMessagePreProcessor(llmService: LlmService): Promise
 /**
  * Create and configure the Decision Engine
  */
-export async function createDecisionEngine(): Promise<DecisionEngine> {
+export async function createDecisionEngine(
+  contextManager: ContextManager,
+  errorHandler: ErrorHandler
+): Promise<DecisionEngine> {
   const config: Partial<DecisionEngineConfig> = {
     maxStateRetention: 1000,
     defaultTimeout: 30000,
@@ -202,7 +205,7 @@ export async function createDecisionEngine(): Promise<DecisionEngine> {
     confidenceThreshold: 0.6
   };
 
-  const decisionEngine = new DecisionEngine(config);
+  const decisionEngine = new DecisionEngine(contextManager, errorHandler, config);
   await decisionEngine.initialize();
   return decisionEngine;
 }
@@ -281,7 +284,7 @@ export async function createSystemOrchestrator(): Promise<SystemOrchestrator> {
 
   const contextManager = await createContextManager();
   const messagePreProcessor = await createMessagePreProcessor(llmService);
-  const decisionEngine = await createDecisionEngine();
+  const decisionEngine = await createDecisionEngine(contextManager, errorHandler);
   const responseGenerator = await createResponseGenerator(llmService);
   const telegramAdapter = await createTelegramInterfaceAdapter();
 
@@ -323,8 +326,25 @@ export async function createSystemOrchestrator(): Promise<SystemOrchestrator> {
     logLevel: appConfig.logLevel as 'debug' | 'info' | 'warn' | 'error'
   };
 
+  // DIAGNOSTIC: Add logging to validate constructor parameter mismatch hypothesis
+  console.log('[ComponentFactory] DIAGNOSTIC - Dependencies object:', Object.keys(dependencies));
+  console.log('[ComponentFactory] DIAGNOSTIC - About to create SystemOrchestrator...');
+
   // Create and initialize the system orchestrator
-  const systemOrchestrator = new SystemOrchestrator(dependencies);
+  const systemOrchestrator = new SystemOrchestrator(
+    telegramAdapter,
+    messagePreProcessor,
+    decisionEngine,
+    contextManager,
+    responseGenerator,
+    errorHandler
+  );
+
+  // DIAGNOSTIC: Check if decisionEngine is actually set
+  console.log('[ComponentFactory] DIAGNOSTIC - SystemOrchestrator created');
+  console.log('[ComponentFactory] DIAGNOSTIC - decisionEngine property:', (systemOrchestrator as any).decisionEngine ? 'EXISTS' : 'UNDEFINED');
+  console.log('[ComponentFactory] DIAGNOSTIC - telegramAdapter property:', (systemOrchestrator as any).telegramAdapter ? 'EXISTS' : 'UNDEFINED');
+
   await systemOrchestrator.initialize(systemConfig);
 
   console.log('[ComponentFactory] System Orchestrator created successfully');

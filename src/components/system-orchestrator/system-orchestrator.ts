@@ -89,6 +89,9 @@ import {
   QueueEvent
 } from '../../services/message-queue/index.ts';
 
+// Import logging system for log rotation
+import { rotateLog } from '../../utils/log-manager.ts';
+
 @injectable()
 export class SystemOrchestrator implements ISystemOrchestrator {
   private config!: SystemOrchestratorConfig;
@@ -340,6 +343,16 @@ export class SystemOrchestrator implements ISystemOrchestrator {
    * Process an update (either directly or from the queue)
    */
   private async processUpdate(update: TelegramUpdate, requestId: string): Promise<string> {
+    // Rotate log for new message session
+    try {
+      const rotatedFile = await rotateLog();
+      if (rotatedFile) {
+        console.log(`[SystemOrchestrator] Rotated previous session log to: ${rotatedFile}`);
+      }
+    } catch (error) {
+      console.warn(`[SystemOrchestrator] Failed to rotate log: ${error.message}`);
+    }
+
     console.log(`=== ORCHESTRATOR CALLED ===`);
     console.log(`[SystemOrchestrator] Processing update ${requestId}`);
     console.log(`[SystemOrchestrator] Update content:`, JSON.stringify(update, null, 2));
@@ -377,8 +390,17 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
       // DIAGNOSTIC: Check DecisionEngine state before processing
       const chatId = update.message.chat.id;
-      const initialState = await this.decisionEngine.getCurrentState(chatId);
-      console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine initial state for chat ${chatId}: ${initialState}`);
+      console.log(`[SystemOrchestrator] DIAGNOSTIC - Chat ID: ${chatId} (type: ${typeof chatId})`);
+      console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine object:`, this.decisionEngine ? 'EXISTS' : 'UNDEFINED');
+
+      // FIX: Add await since getCurrentState returns Promise<DecisionState>
+      if (this.decisionEngine && typeof this.decisionEngine.getCurrentState === 'function') {
+        const initialState = await this.decisionEngine.getCurrentState(chatId);
+        console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine initial state for chat ${chatId}: ${initialState}`);
+      } else {
+        console.error(`[SystemOrchestrator] CRITICAL ERROR - DecisionEngine getCurrentState method not available`);
+        console.error(`[SystemOrchestrator] DecisionEngine methods:`, Object.getOwnPropertyNames(this.decisionEngine || {}));
+      }
 
       // Text is guaranteed to exist after the check above
       const messageText = update.message.text;

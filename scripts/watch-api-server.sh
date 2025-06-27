@@ -40,7 +40,7 @@ trap cleanup SIGINT SIGTERM EXIT
 # Function to start the Deno server
 start_server() {
     echo "🚀 Starting Deno API server on port $PORT..."
-    deno run --allow-net --allow-env --allow-read --unstable-kv src/core/start-api-server.ts &
+    deno run --allow-write --allow-net --allow-env --allow-read --unstable-kv src/core/start-api-server.ts &
     DENO_PID=$!
     echo "   Server started with PID: $DENO_PID"
 }

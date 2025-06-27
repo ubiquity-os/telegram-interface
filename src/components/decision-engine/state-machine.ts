@@ -84,7 +84,9 @@ export class DecisionStateMachine {
       [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR
     },
     [DecisionState.ERROR]: {
-      [DecisionEvent.RESET]: DecisionState.IDLE
+      [DecisionEvent.RESET]: DecisionState.IDLE,
+      [DecisionEvent.MESSAGE_RECEIVED]: DecisionState.MESSAGE_RECEIVED,
+      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR  // Allow error->error for multiple errors
     }
   };
 

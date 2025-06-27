@@ -18,6 +18,9 @@ import { UMPFormatter } from './protocol/ump-formatter.ts';
 import { SystemOrchestrator } from '../components/system-orchestrator/system-orchestrator.ts';
 import { TelegramUpdate, ToolDefinition } from '../interfaces/component-interfaces.ts';
 
+// Import logging system for log rotation
+import { rotateLog } from '../utils/log-manager.ts';
+
 /**
  * Message Router Configuration
  */
@@ -66,6 +69,16 @@ export class MessageRouter {
     session: Session
   ): Promise<UniversalResponse> {
     const startTime = Date.now();
+
+    // Rotate log for new message session
+    try {
+      const rotatedFile = await rotateLog();
+      if (rotatedFile) {
+        this.log('info', `Rotated previous session log to: ${rotatedFile}`);
+      }
+    } catch (error) {
+      this.log('warn', `Failed to rotate log: ${error.message}`);
+    }
 
     try {
       this.log('info', `Routing message ${universalMessage.id} from platform ${universalMessage.platform}`);
@@ -159,17 +172,30 @@ export class MessageRouter {
       );
     }
 
+    // Handle user ID conversion (similar to chat ID logic)
+    let userIdNumeric: number;
+    const userIdRaw = universalMessage.userId;
+
+    if (typeof userIdRaw === 'string' && !isNaN(Number(userIdRaw))) {
+      userIdNumeric = parseInt(userIdRaw, 10);
+    } else if (typeof userIdRaw === 'number') {
+      userIdNumeric = userIdRaw;
+    } else {
+      // For non-numeric user IDs, create a deterministic numeric representation
+      userIdNumeric = this.stringToNumericId(userIdRaw);
+    }
+
     return {
       update_id: telegramData.updateId,
       message: {
         message_id: telegramData.messageId,
         date: Math.floor(universalMessage.timestamp.getTime() / 1000),
         chat: {
-          id: telegramData.chatId,
+          id: telegramData.chatId, // Telegram platform data already contains numeric chatId
           type: telegramData.chatType
         },
         from: {
-          id: parseInt(universalMessage.userId),
+          id: userIdNumeric,
           is_bot: telegramData.isBot,
           first_name: telegramData.firstName || 'User',
           last_name: telegramData.lastName,
@@ -186,23 +212,75 @@ export class MessageRouter {
   private convertToInternalFormat(universalMessage: UniversalMessage): any {
     // Create a mock Telegram update for REST API messages
     // This allows us to reuse the existing SystemOrchestrator logic
+    const chatIdRaw = universalMessage.conversation.chatId;
+
+    // Handle both numeric (Telegram) and string (REST API) chat IDs
+    let chatIdNumeric: number;
+
+    if (typeof chatIdRaw === 'string' && !isNaN(Number(chatIdRaw))) {
+      // If it's a numeric string, parse it directly
+      chatIdNumeric = parseInt(chatIdRaw, 10);
+    } else if (typeof chatIdRaw === 'number') {
+      // If it's already a number (from Telegram), use it directly
+      chatIdNumeric = chatIdRaw;
+    } else {
+      // For non-numeric string chat IDs (REST API), create a deterministic numeric representation
+      chatIdNumeric = this.stringToNumericId(chatIdRaw);
+    }
+
+    // Parse user ID with similar logic
+    let userIdNumeric: number;
+    const userIdRaw = universalMessage.userId;
+
+    if (typeof userIdRaw === 'string' && !isNaN(Number(userIdRaw))) {
+      userIdNumeric = parseInt(userIdRaw, 10);
+    } else {
+      // For non-numeric user IDs, create a deterministic numeric representation
+      userIdNumeric = this.stringToNumericId(userIdRaw);
+    }
+
     return {
       update_id: Date.now(),
       message: {
         message_id: Date.now(),
         date: Math.floor(universalMessage.timestamp.getTime() / 1000),
         chat: {
-          id: parseInt(universalMessage.conversation.chatId),
+          id: chatIdNumeric,
           type: 'private'
         },
         from: {
-          id: parseInt(universalMessage.userId),
+          id: userIdNumeric,
           is_bot: false,
           first_name: 'API User'
         },
         text: universalMessage.content.text
       }
     };
+  }
+
+  /**
+   * Convert string ID to a deterministic numeric representation
+   * Uses a simple hash function to ensure consistency
+   */
+  private stringToNumericId(str: string): number {
+    if (!str || typeof str !== 'string') {
+      throw new UMPError(
+        `Invalid string ID: "${str}" cannot be converted to numeric representation`,
+        UMPErrorType.VALIDATION_ERROR,
+        Platform.REST_API
+      );
+    }
+
+    // Simple hash function to convert string to number
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+
+    // Ensure positive number and within safe integer range
+    return Math.abs(hash) % Number.MAX_SAFE_INTEGER;
   }
 
   /**

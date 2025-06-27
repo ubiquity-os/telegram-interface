@@ -17,12 +17,14 @@ import type {
   IContextManager,
   IErrorHandler,
   ComponentStatus,
-  DecisionState,
   DecisionContext,
   Decision,
   ToolCall,
   ToolResult
 } from '../../interfaces/component-interfaces.ts';
+
+// Import DecisionState as runtime value (not type-only)
+import { DecisionState } from '../../interfaces/component-interfaces.ts';
 
 import {
   TelegramMessage,
@@ -245,10 +247,21 @@ export class DecisionEngine implements IDecisionEngine {
       return decision;
 
     } catch (error) {
-      // Handle error and transition to error state
-      this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
-        error: error.message
-      });
+      // DIAGNOSTIC: Log error transition attempt
+      const currentState = this.stateMachine.getCurrentState(chatId);
+      console.log(`[DecisionEngine] DIAGNOSTIC - Error occurred in state: ${currentState}`);
+      console.log(`[DecisionEngine] DIAGNOSTIC - Attempting to transition ERROR_OCCURRED from ${currentState}`);
+
+      // FIX: Only transition to error if not already in error state
+      if (currentState !== DecisionState.ERROR) {
+        console.log(`[DecisionEngine] Transitioning to ERROR state due to: ${error.message}`);
+        this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
+          error: error.message
+        });
+      } else {
+        console.log(`[DecisionEngine] Already in ERROR state, resetting to IDLE instead`);
+        this.stateMachine.transition(chatId, DecisionEvent.RESET);
+      }
 
       // Save state after transition
       if (this.statePersistence) {
