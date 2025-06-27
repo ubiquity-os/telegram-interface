@@ -34,7 +34,7 @@ Bot: What type of database would work best for your project?
 Options:
 1. PostgreSQL (Relational)
 2. MongoDB (NoSQL)
-3. Redis (Key-Value)
+3. Deno KV (Key-Value)
 4. Neo4j (Graph)
 
 User: 2
@@ -46,7 +46,7 @@ Bot: What type of database would work best for your project?
 
 [PostgreSQL (Relational)]
 [MongoDB (NoSQL)]
-[Redis (Key-Value)]
+[Deno KV (Key-Value)]
 [Neo4j (Graph)]
 
 User: *clicks button*

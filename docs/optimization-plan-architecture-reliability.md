@@ -93,7 +93,7 @@ graph TB
     end
 
     subgraph "Data Layer"
-        RC[(Redis Cluster<br/>- State Cache<br/>- Session Store)]
+        DC[(Deno KV Store<br/>- State Cache<br/>- Session Store)]
         PG[(PostgreSQL<br/>- Conversations<br/>- User Data)]
         KF[Kafka<br/>Event Stream]
     end
@@ -137,18 +137,18 @@ interface StatePersistence {
   async cleanupStale(olderThan: Date): Promise<number>;
 }
 
-class RedisStatePersistence implements StatePersistence {
-  constructor(private redis: Redis) {}
+class DenoKvStatePersistence implements StatePersistence {
+  constructor(private kv: Deno.Kv) {}
 
   async saveState(chatId: number, state: ChatState): Promise<void> {
-    const key = `chat:${chatId}:state`;
-    await this.redis.setex(key, 3600, JSON.stringify(state)); // 1 hour TTL
+    const key = ["chat", chatId, "state"];
+    await this.kv.set(key, state, { expireIn: 3600000 }); // 1 hour TTL
   }
 
   async loadState(chatId: number): Promise<ChatState | null> {
-    const key = `chat:${chatId}:state`;
-    const data = await this.redis.get(key);
-    return data ? JSON.parse(data) : null;
+    const key = ["chat", chatId, "state"];
+    const result = await this.kv.get(key);
+    return result.value as ChatState | null;
   }
 }
 ```
@@ -1435,7 +1435,7 @@ gantt
 
 2. **Infrastructure**
    - Kubernetes cluster upgrade
-   - Redis cluster for state
+   - Deno KV for state
    - Monitoring stack (Prometheus + Grafana)
    - PostgreSQL for persistent storage
 

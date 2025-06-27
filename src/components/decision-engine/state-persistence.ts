@@ -36,9 +36,9 @@ export interface StatePersistence {
 }
 
 /**
- * Redis-based state persistence implementation
+ * Deno.kv-based state persistence implementation
  */
-export class RedisStatePersistence implements StatePersistence {
+export class DenoKvStatePersistence implements StatePersistence {
   private kv: Deno.Kv;
   private keyPrefix = 'decision_engine_state';
 

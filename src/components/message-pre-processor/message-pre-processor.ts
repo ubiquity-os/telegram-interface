@@ -88,11 +88,9 @@ export class MessagePreProcessor implements IMessagePreProcessor {
     }
 
     try {
-      // Test LLM service connectivity (skip if configured)
-      if (!this.config.skipLLMTest) {
-        await this.testLLMService();
-      } else if (this.config.verbose) {
-        console.log('[MessagePreProcessor] Skipping LLM service test (development mode)');
+      // LLM service will be tested on-demand when first message is processed
+      if (this.config.verbose) {
+        console.log('[MessagePreProcessor] LLM service will be tested on-demand when processing messages');
       }
 
       this.isInitialized = true;
@@ -346,26 +344,6 @@ export class MessagePreProcessor implements IMessagePreProcessor {
       this.stats.totalAnalyzed;
   }
 
-  /**
-   * Test LLM service connectivity
-   */
-  private async testLLMService(): Promise<void> {
-    try {
-      const testResponse = await this.llmService.getAiResponse({
-        messages: [
-          { role: 'system', content: 'You are a helpful assistant.' },
-          { role: 'user', content: 'Reply with "OK" if you receive this message.' }
-        ]
-      });
-
-      if (!testResponse || testResponse.trim().length === 0) {
-        throw new Error('LLM service returned empty response');
-      }
-    } catch (error) {
-      const err = error as Error;
-      throw new Error(`LLM service test failed: ${err.message}`);
-    }
-  }
 
   /**
    * Get pre-processor statistics

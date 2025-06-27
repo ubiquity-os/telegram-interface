@@ -10,7 +10,7 @@ import {
   ToolExecutionContext,
   DecisionMetrics
 } from './types.ts';
-import { StatePersistence, RedisStatePersistence, MemoryStatePersistence } from './state-persistence.ts';
+import { StatePersistence, DenoKvStatePersistence, MemoryStatePersistence } from './state-persistence.ts';
 
 import type {
   IDecisionEngine,
@@ -92,13 +92,13 @@ export class DecisionEngine implements IDecisionEngine {
     // Initialize state persistence if enabled
     if (this.config.enableStatePersistence) {
       try {
-        // Try to use Redis persistence with Deno KV
+        // Try to use Deno KV persistence
         const kv = await Deno.openKv();
-        this.statePersistence = new RedisStatePersistence(kv);
-        console.log('[DecisionEngine] Using Redis state persistence');
+        this.statePersistence = new DenoKvStatePersistence(kv);
+        console.log('[DecisionEngine] Using Deno.kv state persistence');
       } catch (error) {
         // Fall back to memory persistence if KV is not available
-        console.warn('[DecisionEngine] Failed to initialize Redis persistence, falling back to memory:', error);
+        console.warn('[DecisionEngine] Failed to initialize Deno KV persistence, falling back to memory:', error);
         this.statePersistence = new MemoryStatePersistence();
       }
     }

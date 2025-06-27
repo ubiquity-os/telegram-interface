@@ -39,10 +39,6 @@ export interface MessagePreProcessorConfig {
    */
   confidenceThreshold: number;
 
-  /**
-   * Skip LLM service test during initialization (for development/testing)
-   */
-  skipLLMTest?: boolean;
 }
 
 /**

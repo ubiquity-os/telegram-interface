@@ -182,7 +182,6 @@ export async function createMessagePreProcessor(llmService: LlmService): Promise
     temperature: 0.3,
     verbose: true,
     confidenceThreshold: 0.6,
-    skipLLMTest: isTestMode // Skip LLM test when using test credentials
   };
 
   const preProcessor = new MessagePreProcessor(llmService, config);
