@@ -155,7 +155,7 @@ IMPORTANT: Return ONLY valid JSON, no markdown formatting or additional text.`;
   /**
    * Build a simple analysis for fallback (when LLM fails)
    */
-  static buildFallbackAnalysis(message: string): LLMAnalysisResponse {
+  static buildFallbackAnalysis(message: string, context?: ConversationContext): LLMAnalysisResponse {
     // Simple heuristics for fallback
     const lowerMessage = message.toLowerCase();
 
@@ -183,13 +183,28 @@ IMPORTANT: Return ONLY valid JSON, no markdown formatting or additional text.`;
       intent.indicators = ['command pattern detected'];
     }
 
+    // Check for context-dependent questions using conversation history
+    let requiresContext = false;
+    if (context && context.messages.length > 0) {
+      const contextualPatterns = [
+        'what was', 'what did', 'my first', 'my last', 'earlier', 'before',
+        'previous', 'that message', 'the message', 'what i said', 'what you said'
+      ];
+
+      if (contextualPatterns.some(pattern => lowerMessage.includes(pattern))) {
+        requiresContext = true;
+        intent.primary = 'question';
+        intent.indicators.push('context-dependent question pattern');
+      }
+    }
+
     return {
       intent,
       entities: [],
       suggestedTools: [],
-      requiresContext: false,
+      requiresContext,
       confidence: 0.3,
-      reasoning: 'Fallback analysis using simple heuristics'
+      reasoning: `Fallback analysis using simple heuristics${context ? ' with conversation context' : ''}`
     };
   }
 

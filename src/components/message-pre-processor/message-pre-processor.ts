@@ -216,7 +216,7 @@ export class MessagePreProcessor implements IMessagePreProcessor {
 
       // Return fallback analysis with error context
       console.log('[MessagePreProcessor] Falling back to rule-based analysis due to LLM failure');
-      const fallback = this.createFallbackAnalysis(message);
+      const fallback = this.createFallbackAnalysis(message, context);
       // Add error metadata to fallback
       fallback.confidence = Math.max(fallback.confidence - 0.3, 0.1); // Reduce confidence due to error
       this.updateStats(fallback, Date.now() - startTime);
@@ -325,8 +325,8 @@ export class MessagePreProcessor implements IMessagePreProcessor {
   /**
    * Create fallback analysis when LLM fails
    */
-  private createFallbackAnalysis(message: string): MessageAnalysis {
-    const fallback = PromptBuilder.buildFallbackAnalysis(message);
+  private createFallbackAnalysis(message: string, context?: ConversationContext): MessageAnalysis {
+    const fallback = PromptBuilder.buildFallbackAnalysis(message, context);
     return this.convertToMessageAnalysis(fallback);
   }
 

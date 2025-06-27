@@ -420,14 +420,22 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
       constraints: context.constraints
     });
 
+    console.log(`[ResponseGenerator] STARTING buildConversationContext() call`);
+
     // Build conversation history for context
     const messages: OpenRouterMessage[] = this.buildConversationContext(context);
+
+    console.log(`[ResponseGenerator] RETURNED from buildConversationContext() with ${messages.length} messages`);
+
+    console.log(`[ResponseGenerator] Current message to add: "${context.originalMessage}"`);
 
     // Add the current message
     messages.push({
       role: 'user',
       content: context.originalMessage
     });
+
+    console.log(`[ResponseGenerator] After adding current message: ${messages.length} messages total`);
 
     console.log(`[ResponseGenerator] Built messages for LLM:`, JSON.stringify(messages, null, 2));
 
@@ -445,15 +453,9 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
         stack: error.stack
       });
 
-      // Fallback to a simple response
-      if (context.originalMessage.toLowerCase().includes('hello') ||
-          context.originalMessage.toLowerCase().includes('hi')) {
-        console.log(`[ResponseGenerator] Using greeting fallback for: "${context.originalMessage}"`);
-        return getRandomGreeting(this.config.responseTemplates?.greetings);
-      }
-
-      console.log(`[ResponseGenerator] Using generic fallback response for: "${context.originalMessage}"`);
-      return "I'm sorry, I couldn't process your request at the moment. Please try again.";
+      // Enhanced fallback logic with conversation context
+      console.log(`[ResponseGenerator] Using context-aware fallback for: "${context.originalMessage}"`);
+      return this.generateContextAwareFallback(context);
     }
   }
 
@@ -461,6 +463,12 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
    * Build conversation context for LLM
    */
   private buildConversationContext(context: ResponseContext): OpenRouterMessage[] {
+    console.log(`[ResponseGenerator] *** ENTERING buildConversationContext() ***`);
+    console.log(`[ResponseGenerator] Context received:`, {
+      conversationHistoryLength: context.conversationHistory?.length || 0,
+      originalMessage: context.originalMessage
+    });
+
     let systemPrompt = `You are a helpful assistant. Respond in a ${context.constraints.tone || 'casual'} tone.
                   Keep responses concise and under ${context.constraints.maxLength || 500} characters.`;
 
@@ -479,14 +487,121 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
     // Add conversation history
     const recentMessages = context.conversationHistory.slice(-5); // Last 5 messages
 
-    for (const msg of recentMessages) {
+    console.log(`[ResponseGenerator] CONVERSATION HISTORY DEBUG:`);
+    console.log(`[ResponseGenerator] Total history length: ${context.conversationHistory.length}`);
+    console.log(`[ResponseGenerator] Recent messages to process: ${recentMessages.length}`);
+    console.log(`[ResponseGenerator] Full conversation history:`, JSON.stringify(context.conversationHistory, null, 2));
+
+    for (let i = 0; i < recentMessages.length; i++) {
+      const msg = recentMessages[i];
+      console.log(`[ResponseGenerator] Processing message ${i + 1}/${recentMessages.length}:`);
+      console.log(`[ResponseGenerator]   - ID: ${msg.id}`);
+      console.log(`[ResponseGenerator]   - Content: "${msg.content}"`);
+      console.log(`[ResponseGenerator]   - Source: ${msg.metadata.source}`);
+
+      const role = msg.metadata.source === 'system' ? 'assistant' : 'user';
+      console.log(`[ResponseGenerator]   - Mapped to role: ${role}`);
+
       messages.push({
-        role: msg.metadata.source === 'system' ? 'assistant' : 'user',
+        role,
         content: msg.content
       });
+
+      console.log(`[ResponseGenerator]   - Added to messages array (total now: ${messages.length})`);
     }
 
+    console.log(`[ResponseGenerator] FINAL MESSAGES ARRAY:`, JSON.stringify(messages, null, 2));
     return messages;
+  }
+
+  /**
+   * Generate context-aware fallback response when LLM service fails
+   */
+  private generateContextAwareFallback(context: ResponseContext): string {
+    const message = context.originalMessage.toLowerCase();
+    const conversation = context.conversationHistory || [];
+
+    console.log(`[ResponseGenerator] Generating context-aware fallback for: "${context.originalMessage}"`);
+    console.log(`[ResponseGenerator] Available conversation history: ${conversation.length} messages`);
+
+    // Handle greetings
+    if (message.includes('hello') || message.includes('hi') || message.includes('hey')) {
+      return getRandomGreeting(this.config.responseTemplates?.greetings);
+    }
+
+    // Handle conversation history questions
+    if (conversation.length > 0) {
+      // Questions about first message
+      if (message.includes('first message') || message.includes('very first')) {
+        const firstUserMessage = conversation.find(msg =>
+          msg.metadata.source === 'telegram' && msg.content.length > 0
+        );
+        if (firstUserMessage) {
+          return `I can see your first message was: "${firstUserMessage.content}"`;
+        }
+      }
+
+      // Questions about last message
+      if (message.includes('last message') || message.includes('previous message')) {
+        const lastUserMessage = [...conversation]
+          .reverse()
+          .find(msg => msg.metadata.source === 'telegram' && msg.content.length > 0);
+        if (lastUserMessage) {
+          return `Your last message was: "${lastUserMessage.content}"`;
+        }
+      }
+
+      // Questions about what was said
+      if (message.includes('what did i say') || message.includes('what i said')) {
+        const userMessages = conversation
+          .filter(msg => msg.metadata.source === 'telegram')
+          .slice(-3); // Last 3 user messages
+        if (userMessages.length > 0) {
+          const messageList = userMessages.map((msg, i) => `${i + 1}. "${msg.content}"`).join('\n');
+          return `Here are your recent messages:\n${messageList}`;
+        }
+      }
+
+      // Questions about what bot said
+      if (message.includes('what did you say') || message.includes('what you said')) {
+        const botMessages = conversation
+          .filter(msg => msg.metadata.source === 'system')
+          .slice(-3); // Last 3 bot messages
+        if (botMessages.length > 0) {
+          const messageList = botMessages.map((msg, i) => `${i + 1}. "${msg.content}"`).join('\n');
+          return `Here are my recent responses:\n${messageList}`;
+        }
+      }
+
+      // General conversation summary
+      if (message.includes('conversation') || message.includes('talked about')) {
+        const messageCount = conversation.length;
+        const userMessageCount = conversation.filter(msg => msg.metadata.source === 'telegram').length;
+        return `We've exchanged ${messageCount} messages so far. You've sent ${userMessageCount} messages and I've responded ${messageCount - userMessageCount} times.`;
+      }
+
+      // Questions about specific content
+      if (message.includes('about') || message.includes('mentioned')) {
+        const recentMessages = conversation.slice(-5);
+        const hasContent = recentMessages.some(msg => msg.content.length > 10);
+        if (hasContent) {
+          return `I can see we've been discussing various topics. While I can't process your full request right now, I can see our conversation history and will reference it when my main systems are available.`;
+        }
+      }
+    }
+
+    // Handle commands or direct requests
+    if (message.includes('help') || message.startsWith('/help')) {
+      return `I'm having technical difficulties with my main AI system, but I can still access our conversation history. Try asking me about our previous messages or wait a moment for my full capabilities to return.`;
+    }
+
+    // Default context-aware fallback
+    if (conversation.length > 0) {
+      return `I'm experiencing technical difficulties with my main AI system, but I can see we have ${conversation.length} messages in our conversation. Feel free to ask about our previous discussion or try your request again in a moment.`;
+    }
+
+    // Complete fallback when no context is available
+    return "I'm sorry, I'm experiencing technical difficulties and couldn't process your request. Please try again in a moment.";
   }
 
   /**
