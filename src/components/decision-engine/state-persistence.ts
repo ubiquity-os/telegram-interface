@@ -76,6 +76,7 @@ export class DenoKvStatePersistence implements StatePersistence {
       chatId: savedState.chatId,
       currentState: savedState.currentState,
       previousState: savedState.previousState,
+      currentPhase: savedState.currentPhase, // Add support for phase
       stateData: savedState.stateData,
       lastTransition: new Date(savedState.lastTransition),
       transitionHistory: savedState.transitionHistory.map((t: any) => ({

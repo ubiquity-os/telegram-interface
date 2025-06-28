@@ -53,6 +53,9 @@ import {
 import { IMCPToolManager } from '../mcp-tool-manager/types.ts';
 import { ISelfModerationEngine } from '../self-moderation-engine/types.ts';
 
+// Import Telemetry Service
+import { TelemetryService, LogLevel, initializeTelemetry } from '../../services/telemetry/index.ts';
+
 // Import Event Bus
 import {
   eventBus,
@@ -106,6 +109,9 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   // Message queue
   private messageQueue?: MessageQueue;
 
+  // Telemetry service
+  private telemetry?: TelemetryService;
+
   // Component references - injected via constructor
   private messageInterface: IMessageInterface;
   private decisionEngine: IDecisionEngine;
@@ -142,6 +148,42 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     };
   }
 
+  /**
+   * Set telemetry service and propagate to child components
+   */
+  setTelemetry(telemetry: TelemetryService): void {
+    this.telemetry = telemetry;
+
+    // Propagate telemetry to child components that support it
+    if (this.decisionEngine && 'setTelemetry' in this.decisionEngine) {
+      (this.decisionEngine as any).setTelemetry(telemetry);
+    }
+
+    if (this.mcpToolManager && 'setTelemetry' in this.mcpToolManager) {
+      (this.mcpToolManager as any).setTelemetry(telemetry);
+    }
+
+    if (this.responseGenerator && 'setTelemetry' in this.responseGenerator) {
+      (this.responseGenerator as any).setTelemetry(telemetry);
+    }
+
+    if (this.contextManager && 'setTelemetry' in this.contextManager) {
+      (this.contextManager as any).setTelemetry(telemetry);
+    }
+
+    if (this.messagePreProcessor && 'setTelemetry' in this.messagePreProcessor) {
+      (this.messagePreProcessor as any).setTelemetry(telemetry);
+    }
+
+    if (this.errorHandler && 'setTelemetry' in this.errorHandler) {
+      (this.errorHandler as any).setTelemetry(telemetry);
+    }
+
+    if (this.selfModerationEngine && 'setTelemetry' in this.selfModerationEngine) {
+      (this.selfModerationEngine as any).setTelemetry(telemetry);
+    }
+  }
+
   async initialize(config: SystemOrchestratorConfig): Promise<void> {
     if (this.isInitialized) {
       throw new Error('SystemOrchestrator is already initialized');
@@ -151,6 +193,20 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     this.config = config;
 
     try {
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'SystemOrchestrator',
+        phase: 'initialization_start',
+        message: 'Starting SystemOrchestrator initialization',
+        metadata: {
+          hasMessageQueue: !!config.messageQueue,
+          messageQueueConfig: config.messageQueue ? {
+            workerCount: config.messageQueue.workerConfig.maxWorkers,
+            retryConfig: config.messageQueue.retryConfig
+          } : undefined
+        }
+      });
+
       // Initialize components from dependencies
       await this.initializeComponents();
 
@@ -163,7 +219,23 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       // Initialize message queue if configured
       await this.initializeMessageQueue();
 
+      // Initialize telemetry service
+      await this.initializeTelemetry();
+
       this.isInitialized = true;
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'SystemOrchestrator',
+        phase: 'initialization_complete',
+        message: 'SystemOrchestrator initialization completed',
+        metadata: {
+          componentCount: this.components.size,
+          uptime: Date.now() - this.startTime.getTime(),
+          telemetryEnabled: !!this.telemetry,
+          messageQueueEnabled: !!this.messageQueue
+        }
+      });
 
       // Emit system ready event
       await this.eventEmitter.emit<SystemReadyEvent>({
@@ -177,6 +249,19 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       console.log('[SystemOrchestrator] Initialization complete');
     } catch (error) {
       console.error('[SystemOrchestrator] Initialization failed:', error);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.ERROR,
+        component: 'SystemOrchestrator',
+        phase: 'initialization_error',
+        message: 'SystemOrchestrator initialization failed',
+        metadata: {
+          errorMessage: error.message,
+          errorType: error.constructor.name
+        },
+        error: error as Error
+      });
+
       await this.shutdown();
       throw error;
     }
@@ -184,6 +269,14 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
   private async initializeComponents(): Promise<void> {
     console.log('[SystemOrchestrator] Initializing components...');
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'component_initialization_start',
+      message: 'Starting component initialization',
+      metadata: {}
+    });
 
     // Register core components that implement IComponent
     const componentsToRegister = [
@@ -206,6 +299,18 @@ export class SystemOrchestrator implements ISystemOrchestrator {
         restartCount: 0
       });
 
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'component_registered',
+        message: 'Component registered successfully',
+        metadata: {
+          componentName: name,
+          required,
+          initOrder: order
+        }
+      });
+
       // Emit component initialized event
       await this.eventEmitter.emit<ComponentInitializedEvent>({
         type: SystemEventType.COMPONENT_INITIALIZED,
@@ -216,11 +321,30 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       });
     }
 
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'component_initialization_complete',
+      message: 'All components initialized successfully',
+      metadata: {
+        totalComponents: componentsToRegister.length,
+        requiredComponents: componentsToRegister.filter(c => c.required).length
+      }
+    });
+
     console.log('[SystemOrchestrator] All components initialized');
   }
 
   private async setupComponentHandlers(): Promise<void> {
     console.log('[SystemOrchestrator] Setting up component handlers...');
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'handler_setup_start',
+      message: 'Setting up component handlers',
+      metadata: {}
+    });
 
     // Subscribe to updates from message interface
     // Note: Platform-specific adapters handle their own subscription logic
@@ -229,7 +353,23 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       (this.messageInterface as any).subscribe(async (update: TelegramUpdate) => {
         await this.handleUpdate(update);
       });
+
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'message_interface_subscribed',
+        message: 'Subscribed to message interface updates',
+        metadata: {}
+      });
     }
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'handler_setup_complete',
+      message: 'Component handlers configured successfully',
+      metadata: {}
+    });
 
     console.log('[SystemOrchestrator] Component handlers configured');
   }
@@ -239,50 +379,151 @@ export class SystemOrchestrator implements ISystemOrchestrator {
    */
   private async initializeMessageQueue(): Promise<void> {
     if (!this.config.messageQueue) {
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'SystemOrchestrator',
+        phase: 'message_queue_skip',
+        message: 'Message queue not configured, using direct processing',
+        metadata: {}
+      });
+
       console.log('[SystemOrchestrator] Message queue not configured, using direct processing');
       return;
     }
 
     console.log('[SystemOrchestrator] Initializing message queue...');
 
-    // Create message queue configuration
-    const queueConfig: MessageQueueConfig = {
-      maxQueueSize: 1000,
-      workerPool: {
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'message_queue_init_start',
+      message: 'Starting message queue initialization',
+      metadata: {
         minWorkers: this.config.messageQueue.workerConfig.minWorkers,
         maxWorkers: this.config.messageQueue.workerConfig.maxWorkers,
-        workerIdleTimeout: this.config.messageQueue.workerConfig.idleTimeout,
-        autoscale: true,
-        scalingThreshold: 50
-      },
-      priorityBoost: {
-        commands: true,
-        adminUsers: [],
-        keywords: ['help', 'start', 'stop']
-      },
-      deadLetterQueue: {
-        enabled: true,
         maxRetries: this.config.messageQueue.retryConfig.maxRetries
       }
-    };
-
-    // Create message queue
-    this.messageQueue = new MessageQueue(queueConfig);
-
-    // Subscribe to queue events
-    this.messageQueue.on(QueueEventTypeEnum.MESSAGE_FAILED, (event: QueueEvent) => {
-      console.error('[SystemOrchestrator] Message processing failed:', event.data);
-      // The dead letter queue will handle retry logic
     });
 
-    this.messageQueue.on(QueueEventTypeEnum.QUEUE_FULL, (event: QueueEvent) => {
-      console.warn('[SystemOrchestrator] Message queue is full:', event.data);
-    });
+    try {
+      // Create message queue configuration
+      const queueConfig: MessageQueueConfig = {
+        maxQueueSize: 1000,
+        workerPool: {
+          minWorkers: this.config.messageQueue.workerConfig.minWorkers,
+          maxWorkers: this.config.messageQueue.workerConfig.maxWorkers,
+          workerIdleTimeout: this.config.messageQueue.workerConfig.idleTimeout,
+          autoscale: true,
+          scalingThreshold: 50
+        },
+        priorityBoost: {
+          commands: true,
+          adminUsers: [],
+          keywords: ['help', 'start', 'stop']
+        },
+        deadLetterQueue: {
+          enabled: true,
+          maxRetries: this.config.messageQueue.retryConfig.maxRetries
+        }
+      };
 
-    // Start the queue with our message processor
-    await this.messageQueue.start(this.processQueuedMessage.bind(this));
+      // Create message queue
+      this.messageQueue = new MessageQueue(queueConfig);
 
-    console.log('[SystemOrchestrator] Message queue initialized and started');
+      // Subscribe to queue events
+      this.messageQueue.on(QueueEventTypeEnum.MESSAGE_FAILED, (event: QueueEvent) => {
+        console.error('[SystemOrchestrator] Message processing failed:', event.data);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'SystemOrchestrator',
+          phase: 'queue_message_failed',
+          message: 'Message processing failed in queue',
+          metadata: {
+            eventData: event.data,
+            messageId: event.data?.messageId
+          }
+        });
+      });
+
+      this.messageQueue.on(QueueEventTypeEnum.QUEUE_FULL, (event: QueueEvent) => {
+        console.warn('[SystemOrchestrator] Message queue is full:', event.data);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.WARN,
+          component: 'SystemOrchestrator',
+          phase: 'queue_full',
+          message: 'Message queue is at capacity',
+          metadata: {
+            queueSize: event.data?.queueSize,
+            maxSize: event.data?.maxSize
+          }
+        });
+      });
+
+      // Start the queue with our message processor
+      await this.messageQueue.start(this.processQueuedMessage.bind(this));
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'SystemOrchestrator',
+        phase: 'message_queue_init_complete',
+        message: 'Message queue initialized and started successfully',
+        metadata: {
+          maxQueueSize: queueConfig.maxQueueSize,
+          workerPoolConfig: queueConfig.workerPool
+        }
+      });
+
+      console.log('[SystemOrchestrator] Message queue initialized and started');
+    } catch (error) {
+      this.telemetry?.logStructured({
+        level: LogLevel.ERROR,
+        component: 'SystemOrchestrator',
+        phase: 'message_queue_init_error',
+        message: 'Failed to initialize message queue',
+        metadata: {
+          errorMessage: error.message
+        },
+        error: error as Error
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Initialize the telemetry service
+   */
+  private async initializeTelemetry(): Promise<void> {
+    console.log('[SystemOrchestrator] Initializing telemetry service...');
+
+    try {
+      if (!this.telemetry) {
+        this.telemetry = await initializeTelemetry({
+          enableDebugLogs: true,
+          enableConsoleOutput: true
+        });
+
+        // Propagate telemetry to child components after initialization
+        this.setTelemetry(this.telemetry);
+      }
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'SystemOrchestrator',
+        phase: 'telemetry_init_complete',
+        message: 'Telemetry service initialized successfully',
+        metadata: {
+          enableDebugLogs: true,
+          enableConsoleOutput: true
+        }
+      });
+
+      console.log('[SystemOrchestrator] Telemetry service initialized');
+    } catch (error) {
+      console.error('[SystemOrchestrator] Failed to initialize telemetry service:', error);
+      // Don't fail the entire initialization - telemetry is observability, not critical functionality
+    }
   }
 
   /**
@@ -292,6 +533,18 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     const { update, metadata } = queuedMessage;
     const requestId = queuedMessage.id;
 
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'SystemOrchestrator',
+      phase: 'queue_message_processing_start',
+      message: 'Processing queued message',
+      metadata: {
+        messageId: requestId,
+        priority: metadata?.priority,
+        queueWaitTime: Date.now() - queuedMessage.timestamp.getTime()
+      }
+    });
+
     // Process the update with existing logic
     await this.processUpdate(update, requestId);
   }
@@ -300,36 +553,89 @@ export class SystemOrchestrator implements ISystemOrchestrator {
    * Determine message priority based on content and context
    */
   private determineMessagePriority(update: TelegramUpdate): MessagePriority {
+    let priority = MessagePriorityEnum.NORMAL;
+
     // Check if it's a command
     if (update.message?.text?.startsWith('/')) {
-      return MessagePriorityEnum.HIGH;
+      priority = MessagePriorityEnum.HIGH;
     }
-
     // Check for system messages or errors
-    if (update.message?.text?.toLowerCase().includes('error') ||
+    else if (update.message?.text?.toLowerCase().includes('error') ||
         update.message?.text?.toLowerCase().includes('help')) {
-      return MessagePriorityEnum.HIGH;
+      priority = MessagePriorityEnum.HIGH;
     }
-
     // Check for callback queries (button presses)
-    if (update.callback_query) {
-      return MessagePriorityEnum.HIGH;
+    else if (update.callback_query) {
+      priority = MessagePriorityEnum.HIGH;
     }
 
-    // Default to normal priority
-    return MessagePriorityEnum.NORMAL;
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'SystemOrchestrator',
+      phase: 'message_priority_determined',
+      message: 'Message priority determined',
+      metadata: {
+        priority: MessagePriorityEnum[priority],
+        isCommand: update.message?.text?.startsWith('/') || false,
+        hasCallbackQuery: !!update.callback_query,
+        messageText: update.message?.text?.substring(0, 50)
+      }
+    });
+
+    return priority;
   }
 
   async handleUpdate(update: TelegramUpdate): Promise<string> {
+    const startTime = Date.now();
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'update_received',
+      message: 'New update received for processing',
+      metadata: {
+        hasMessage: !!update.message,
+        hasCallbackQuery: !!update.callback_query,
+        chatId: update.message?.chat?.id,
+        messageType: update.message?.text ? 'text' : 'other'
+      }
+    });
+
     // If message queue is enabled, enqueue the message
     if (this.messageQueue) {
       try {
         const priority = this.determineMessagePriority(update);
         const messageId = await this.messageQueue.enqueue(update, priority);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.INFO,
+          component: 'SystemOrchestrator',
+          phase: 'message_enqueued',
+          message: 'Message enqueued for processing',
+          metadata: {
+            messageId,
+            priority: MessagePriorityEnum[priority],
+            queueDepth: this.messageQueue.getStats().queueDepth
+          }
+        });
+
         console.log(`[SystemOrchestrator] Message enqueued with ID: ${messageId}, priority: ${MessagePriorityEnum[priority]}`);
         return "Message queued for processing";
       } catch (error) {
         console.error('[SystemOrchestrator] Failed to enqueue message:', error);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'SystemOrchestrator',
+          phase: 'message_enqueue_error',
+          message: 'Failed to enqueue message, falling back to direct processing',
+          metadata: {
+            errorMessage: error.message,
+            fallbackToDirect: true
+          },
+          error: error as Error
+        });
+
         // Fall back to direct processing
         const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         return await this.processUpdate(update, requestId);
@@ -337,6 +643,18 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     } else {
       // Direct processing without queue
       const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'direct_processing',
+        message: 'Processing message directly (no queue)',
+        metadata: {
+          requestId,
+          processingTime: Date.now() - startTime
+        }
+      });
+
       return await this.processUpdate(update, requestId);
     }
   }
@@ -349,6 +667,29 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     console.log(`[SystemOrchestrator] Processing update ${requestId}`);
     console.log(`[SystemOrchestrator] Update content:`, JSON.stringify(update, null, 2));
 
+    // Start telemetry trace if available
+    if (this.telemetry) {
+      return await this.telemetry.withTrace(
+        'SystemOrchestrator.processUpdate',
+        async () => await this.processUpdateWithTelemetry(update, requestId),
+        {
+          component: 'SystemOrchestrator',
+          requestId,
+          chatId: update.message?.chat?.id,
+          userId: update.message?.from?.id,
+          messageType: update.message?.text ? 'text' : 'other'
+        }
+      );
+    } else {
+      // Fallback without telemetry
+      return await this.processUpdateWithTelemetry(update, requestId);
+    }
+  }
+
+  /**
+   * Process update with telemetry integration
+   */
+  private async processUpdateWithTelemetry(update: TelegramUpdate, requestId: string): Promise<string> {
     const requestContext: RequestContext = {
       requestId,
       update,
@@ -371,10 +712,39 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     this.metrics.totalRequests++;
     this.metrics.activeRequests++;
 
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'message_processing_start',
+      message: 'Starting message processing pipeline',
+      metadata: {
+        requestId,
+        chatId: update.message?.chat?.id,
+        userId: update.message?.from?.id,
+        messageText: update.message?.text?.substring(0, 100),
+        totalRequests: this.metrics.totalRequests,
+        activeRequests: this.metrics.activeRequests
+      }
+    });
+
     try {
       // Stage 1: Receiving message
       if (!update.message || !update.message.text) {
         console.log(`[SystemOrchestrator] Ignoring non-text update ${requestId}`);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.WARN,
+          component: 'SystemOrchestrator',
+          phase: 'non_text_message_ignored',
+          message: 'Non-text message ignored',
+          metadata: {
+            requestId,
+            hasMessage: !!update.message,
+            hasText: !!update.message?.text,
+            messageType: update.callback_query ? 'callback_query' : 'other'
+          }
+        });
+
         return "Non-text message ignored";
       }
 
@@ -389,9 +759,33 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       if (this.decisionEngine && typeof this.decisionEngine.getCurrentState === 'function') {
         const initialState = await this.decisionEngine.getCurrentState(chatId);
         console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine initial state for chat ${chatId}: ${initialState}`);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.DEBUG,
+          component: 'SystemOrchestrator',
+          phase: 'decision_engine_state_check',
+          message: 'DecisionEngine initial state checked',
+          metadata: {
+            requestId,
+            chatId,
+            initialState
+          }
+        });
       } else {
         console.error(`[SystemOrchestrator] CRITICAL ERROR - DecisionEngine getCurrentState method not available`);
         console.error(`[SystemOrchestrator] DecisionEngine methods:`, Object.getOwnPropertyNames(this.decisionEngine || {}));
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'SystemOrchestrator',
+          phase: 'decision_engine_missing',
+          message: 'DecisionEngine getCurrentState method not available',
+          metadata: {
+            requestId,
+            decisionEngineExists: !!this.decisionEngine,
+            availableMethods: Object.getOwnPropertyNames(this.decisionEngine || {})
+          }
+        });
       }
 
       // Text is guaranteed to exist after the check above
@@ -408,6 +802,21 @@ export class SystemOrchestrator implements ISystemOrchestrator {
         lastName: update.message.from.last_name
       };
 
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'telegram_message_parsed',
+        message: 'Telegram message parsed successfully',
+        metadata: {
+          requestId,
+          messageId: telegramMessage.messageId,
+          chatId: telegramMessage.chatId,
+          userId: telegramMessage.userId,
+          messageLength: messageText.length,
+          username: telegramMessage.username
+        }
+      });
+
       // Emit message received event
       await this.eventEmitter.emit<MessageReceivedEvent>({
         type: SystemEventType.MESSAGE_RECEIVED,
@@ -419,6 +828,18 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
       // Stage 2: Store message in context
       this.updateFlowStage(requestId, MessageFlowStage.STORING_CONTEXT);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'context_storage_start',
+        message: 'Starting context storage',
+        metadata: {
+          requestId,
+          chatId: telegramMessage.chatId
+        }
+      });
+
       const internalMessage: InternalMessage = {
         id: `msg_${requestId}`,
         chatId: telegramMessage.chatId,
@@ -436,9 +857,34 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       // Stage 3: Get conversation context
       const conversationContext = await this.contextManager.getContext(telegramMessage.chatId);
 
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'context_retrieved',
+        message: 'Conversation context retrieved',
+        metadata: {
+          requestId,
+          chatId: telegramMessage.chatId,
+          messageCount: conversationContext.messages.length,
+          hasUserPreferences: !!conversationContext.userPreferences
+        }
+      });
+
       // Stage 4: Message Pre-Processing
       this.updateFlowStage(requestId, MessageFlowStage.PREPROCESSING);
       console.log(`[SystemOrchestrator] Stage 4: Calling MessagePreProcessor.analyzeMessage()`);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'preprocessing_start',
+        message: 'Starting message preprocessing',
+        metadata: {
+          requestId,
+          messageText: messageText.substring(0, 100),
+          contextMessageCount: conversationContext.messages.length
+        }
+      });
 
       // Analyze the message using MessagePreProcessor
       const analysis = await this.messagePreProcessor.analyzeMessage(
@@ -447,6 +893,21 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       );
 
       console.log(`[SystemOrchestrator] MessagePreProcessor analysis result:`, JSON.stringify(analysis, null, 2));
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'SystemOrchestrator',
+        phase: 'preprocessing_complete',
+        message: 'Message preprocessing completed',
+        metadata: {
+          requestId,
+          analysisType: analysis.type,
+          intent: analysis.intent,
+          confidence: analysis.confidence,
+          entityCount: analysis.entities?.length || 0,
+          requiresTools: analysis.requiresTools
+        }
+      });
 
       // Emit message analyzed event
       await this.eventEmitter.emit<MessageAnalyzedEvent>({
@@ -461,6 +922,18 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       // Stage 5: Decision making
       this.updateFlowStage(requestId, MessageFlowStage.DECISION_MAKING);
 
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'decision_making_start',
+        message: 'Starting decision making process',
+        metadata: {
+          requestId,
+          analysisType: analysis.type,
+          availableToolCount: this.mcpToolManager ? (await this.mcpToolManager.getAvailableTools()).length : 0
+        }
+      });
+
       const decisionContext: DecisionContext = {
         message: telegramMessage,
         analysis,
@@ -469,6 +942,19 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       };
 
       const decision = await this.decisionEngine.makeDecision(decisionContext);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'SystemOrchestrator',
+        phase: 'decision_made',
+        message: 'Decision made',
+        metadata: {
+          requestId,
+          action: decision.action,
+          toolCallCount: decision.toolCalls?.length || 0,
+          reasoning: decision.reasoning?.substring(0, 200)
+        }
+      });
 
       // Emit decision made event
       await this.eventEmitter.emit<DecisionMadeEvent>({
@@ -484,7 +970,37 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       let toolResults: ToolResult[] = [];
       if (decision.action === 'execute_tools' && decision.toolCalls && this.mcpToolManager) {
         this.updateFlowStage(requestId, MessageFlowStage.TOOL_EXECUTION);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.INFO,
+          component: 'SystemOrchestrator',
+          phase: 'tool_execution_start',
+          message: 'Starting tool execution',
+          metadata: {
+            requestId,
+            toolCount: decision.toolCalls.length,
+            tools: decision.toolCalls.map(tc => ({ toolId: tc.toolId, serverId: tc.serverId }))
+          }
+        });
+
+        const toolExecutionStart = Date.now();
         toolResults = await this.mcpToolManager.executeMultipleTools(decision.toolCalls);
+        const toolExecutionTime = Date.now() - toolExecutionStart;
+
+        this.telemetry?.logStructured({
+          level: LogLevel.INFO,
+          component: 'SystemOrchestrator',
+          phase: 'tool_execution_complete',
+          message: 'Tool execution completed',
+          metadata: {
+            requestId,
+            toolCount: toolResults.length,
+            successCount: toolResults.filter(r => r.success).length,
+            errorCount: toolResults.filter(r => !r.success).length,
+            executionTime: toolExecutionTime
+          },
+          duration: toolExecutionTime
+        });
 
         // Emit tool executed events
         for (const result of toolResults) {
@@ -510,483 +1026,15 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       let moderationAttempts = 0;
       const maxModerationAttempts = 3;
 
-      while (!finalResponse && moderationAttempts < maxModerationAttempts) {
-        this.updateFlowStage(requestId, MessageFlowStage.RESPONSE_GENERATION);
-
-        const responseContext: ResponseContext = {
-          originalMessage: messageText,
-          analysis,
-          toolResults: toolResults.length > 0 ? toolResults : undefined,
-          conversationHistory: conversationContext.messages,
-          constraints: {
-            maxLength: 4096,
-            allowMarkdown: true,
-            requireInlineKeyboard: false
-          },
-          // Add moderation feedback from previous attempt if any
-          ...(moderationAttempts > 0 ? {
-            moderationFeedback: `Previous response was rejected. Please address these issues: ${requestContext.metadata.lastModerationIssues}`
-          } : {})
-        };
-
-        console.log(`=== CALLING RESPONSE GENERATOR ===`);
-        console.log(`[SystemOrchestrator] Calling responseGenerator.generateResponse() with context:`, JSON.stringify(responseContext, null, 2));
-
-        const generatedResponse = await this.responseGenerator.generateResponse(responseContext);
-
-        console.log(`=== RESPONSE GENERATOR RETURNED ===`);
-        console.log(`[SystemOrchestrator] Generated response:`, JSON.stringify(generatedResponse, null, 2));
-
-        // Emit response generated event
-        await this.eventEmitter.emit<ResponseGeneratedEvent>({
-          type: SystemEventType.RESPONSE_GENERATED,
-          payload: {
-            response: generatedResponse,
-            originalMessage: messageText,
-            requestId
-          }
-        });
-
-        // Stage 8: Self-moderation (if enabled)
-        if (this.selfModerationEngine) {
-          this.updateFlowStage(requestId, MessageFlowStage.MODERATION);
-
-          // Emit moderation started event
-          await this.eventEmitter.emit<ModerationStartedEvent>({
-            type: SystemEventType.MODERATION_STARTED,
-            payload: {
-              response: generatedResponse,
-              requestId
-            }
-          });
-
-          try {
-            const moderationResult: ModerationResult = await this.selfModerationEngine.moderateResponse(
-              generatedResponse,
-              responseContext
-            );
-
-            if (moderationResult.approved) {
-              // Response approved
-              finalResponse = generatedResponse;
-
-              await this.eventEmitter.emit<ModerationApprovedEvent>({
-                type: SystemEventType.MODERATION_APPROVED,
-                payload: {
-                  response: generatedResponse,
-                  confidence: moderationResult.confidence,
-                  requestId
-                }
-              });
-            } else if (moderationResult.moderatedResponse) {
-              // Response was modified
-              finalResponse = moderationResult.moderatedResponse;
-
-              await this.eventEmitter.emit<ModerationModifiedEvent>({
-                type: SystemEventType.MODERATION_MODIFIED,
-                payload: {
-                  originalResponse: generatedResponse,
-                  modifiedResponse: moderationResult.moderatedResponse,
-                  requestId
-                }
-              });
-            } else {
-              // Response rejected, need to retry
-              moderationAttempts++;
-
-              // Store moderation issues for feedback
-              const issueDescriptions = moderationResult.issues?.map(issue => issue.description).join(', ') || 'Unknown issues';
-              requestContext.metadata.lastModerationIssues = issueDescriptions;
-
-              await this.eventEmitter.emit<ModerationRejectedEvent>({
-                type: SystemEventType.MODERATION_REJECTED,
-                payload: {
-                  response: generatedResponse,
-                  reasons: moderationResult.issues?.map(issue => ({
-                    type: issue.type.toString(),
-                    severity: issue.severity,
-                    description: issue.description
-                  })) || [],
-                  requestId
-                }
-              });
-
-              if (moderationAttempts >= maxModerationAttempts) {
-                throw new Error(`Failed to generate acceptable response after ${maxModerationAttempts} attempts`);
-              }
-
-              console.log(`[SystemOrchestrator] Response rejected, retrying (attempt ${moderationAttempts + 1}/${maxModerationAttempts})`);
-            }
-
-            // Emit moderation complete event
-            await this.eventEmitter.emit<ModerationCompleteEvent>({
-              type: SystemEventType.MODERATION_COMPLETE,
-              payload: {
-                originalResponse: generatedResponse,
-                moderatedResponse: finalResponse || generatedResponse,
-                passed: moderationResult.approved,
-                requestId
-              }
-            });
-
-          } catch (error) {
-            console.error('[SystemOrchestrator] Moderation failed:', error);
-
-            await this.eventEmitter.emit<ModerationFailedEvent>({
-              type: SystemEventType.MODERATION_FAILED,
-              payload: {
-                response: generatedResponse,
-                error: error as Error,
-                requestId
-              }
-            });
-
-            // Use original response if moderation fails
-            finalResponse = generatedResponse;
-          }
-        } else {
-          // No moderation, use generated response
-          finalResponse = generatedResponse;
-        }
-      }
-
-      if (!finalResponse) {
-        throw new Error('Failed to generate an acceptable response');
-      }
-
-      // Stage 9: Send response
-      this.updateFlowStage(requestId, MessageFlowStage.SENDING_RESPONSE);
-
-      // Store response in context
-      const responseMessage: InternalMessage = {
-        id: `resp_${requestId}`,
-        chatId: telegramMessage.chatId,
-        userId: 0, // System response
-        content: finalResponse.content,
-        timestamp: new Date(),
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'response_generation_init',
+        message: 'Initializing response generation with moderation',
         metadata: {
-          source: 'system',
           requestId,
-          ...finalResponse.metadata
-        }
-      };
-      await this.contextManager.addMessage(responseMessage);
-
-      console.log(`=== SENDING RESPONSE TO MESSAGE INTERFACE ===`);
-      console.log(`[SystemOrchestrator] Final response content: "${finalResponse.content}"`);
-
-      // Send response through generic message interface
-      const genericResponse: GenericResponse = {
-        chatId: telegramMessage.chatId.toString(),
-        text: finalResponse.content,
-        metadata: {
-          parseMode: 'Markdown'
-        }
-      };
-
-      console.log(`[SystemOrchestrator] Sending GenericResponse:`, JSON.stringify(genericResponse, null, 2));
-      await this.messageInterface.sendMessage(genericResponse);
-      console.log(`[SystemOrchestrator] Response sent to MessageInterface`);
-
-      // Update metrics
-      this.updateFlowStage(requestId, MessageFlowStage.COMPLETED);
-      requestContext.endTime = new Date();
-      this.updateMetrics(requestContext);
-      this.metrics.successfulRequests++;
-
-      console.log(`[SystemOrchestrator] Completed processing update ${requestId}`);
-
-      // DIAGNOSTIC: Check DecisionEngine state after processing
-      const finalState = await this.decisionEngine.getCurrentState(chatId);
-      console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine final state for chat ${chatId}: ${finalState}`);
-
-      // Conditional reset logic - only reset on explicit commands or error recovery
-      const shouldReset = this.shouldResetState(telegramMessage);
-      if (shouldReset) {
-        console.log(`[SystemOrchestrator] Resetting DecisionEngine state for chat ${chatId} due to explicit command`);
-        this.decisionEngine.resetChatState(chatId);
-        const resetState = await this.decisionEngine.getCurrentState(chatId);
-        console.log(`[SystemOrchestrator] DecisionEngine state after reset for chat ${chatId}: ${resetState}`);
-      }
-
-      // Return the actual AI-generated response content
-      return finalResponse.content;
-
-    } catch (error) {
-      console.error(`[SystemOrchestrator] Error processing update:`, error);
-
-      // DIAGNOSTIC: Track error details and state
-      const errorChatId = requestContext.update.message?.chat?.id;
-      if (errorChatId) {
-        const errorState = await this.decisionEngine.getCurrentState(errorChatId);
-        console.log(`[SystemOrchestrator] DIAGNOSTIC - DecisionEngine state during error for chat ${errorChatId}: ${errorState}`);
-
-        // Only reset on critical errors that would corrupt state
-        if (this.isCriticalError(error)) {
-          console.log(`[SystemOrchestrator] Resetting DecisionEngine state after critical error for chat ${errorChatId}`);
-          this.decisionEngine.resetChatState(errorChatId);
-        }
-      }
-
-      // Emit error event
-      await this.eventEmitter.emit<ErrorOccurredEvent>({
-        type: SystemEventType.ERROR_OCCURRED,
-        payload: {
-          error: error as Error,
-          context: {
-            operation: 'handleUpdate',
-            component: 'SystemOrchestrator',
-            chatId: requestContext.update.message?.chat?.id,
-            metadata: { requestId }
-          },
-          requestId
-        }
-      });
-
-      this.updateFlowStage(requestId, MessageFlowStage.ERROR);
-      this.metrics.failedRequests++;
-
-      // Try to send error response to user
-      if (requestContext.update.message?.chat?.id) {
-        try {
-          const errorResponse: GenericResponse = {
-            chatId: requestContext.update.message.chat.id.toString(),
-            text: this.errorHandler.getUserFriendlyMessage(error as Error)
-          };
-          await this.messageInterface.sendMessage(errorResponse);
-        } catch (sendError) {
-          console.error('[SystemOrchestrator] Failed to send error response:', sendError);
-        }
-      }
-
-      // Return error message for REST API users
-      return this.errorHandler.getUserFriendlyMessage(error as Error);
-    } finally {
-      this.metrics.activeRequests--;
-      this.flowTrackers.delete(requestId);
-    }
-  }
-
-  /**
-   * Subscribe to system events
-   */
-  private async subscribeToEvents(): Promise<void> {
-    console.log('[SystemOrchestrator] Subscribing to system events');
-
-    // Subscribe to error events from all components
-    eventBus.on(SystemEventType.ERROR_OCCURRED, async (event: ErrorOccurredEvent) => {
-      console.error(`[SystemOrchestrator] Error event from ${event.source}:`, event.payload.error);
-
-      // Handle critical errors
-      if (event.payload.context.component && this.components.has(event.payload.context.component)) {
-        const component = this.components.get(event.payload.context.component)!;
-        component.state = ComponentState.ERROR;
-        component.lastError = event.payload.error;
-
-        // Attempt to restart critical components
-        if (component.required && component.restartCount < 3) {
-          console.log(`[SystemOrchestrator] Attempting to restart ${component.name}`);
-          setTimeout(() => {
-            this.restartComponent(component.name).catch(err =>
-              console.error(`[SystemOrchestrator] Failed to restart ${component.name}:`, err)
-            );
-          }, 5000);
-        }
-      }
-    });
-
-    // Subscribe to component lifecycle events
-    eventBus.on(SystemEventType.COMPONENT_INITIALIZED, async (event: ComponentInitializedEvent) => {
-      console.log(`[SystemOrchestrator] Component initialized: ${event.payload.componentName}`);
-    });
-
-    eventBus.on(SystemEventType.COMPONENT_SHUTDOWN, async (event: ComponentShutdownEvent) => {
-      console.log(`[SystemOrchestrator] Component shutdown: ${event.payload.componentName}`);
-    });
-
-    eventBus.on(SystemEventType.COMPONENT_ERROR, async (event: ComponentErrorEvent) => {
-      console.error(`[SystemOrchestrator] Component error in ${event.payload.componentName}:`, event.payload.error);
-    });
-  }
-
-  private updateFlowStage(requestId: string, stage: MessageFlowStage): void {
-    const tracker = this.flowTrackers.get(requestId);
-    if (!tracker) return;
-
-    const now = new Date();
-    if (tracker.stages.length > 0) {
-      const lastStage = tracker.stages[tracker.stages.length - 1];
-      lastStage.duration = now.getTime() - lastStage.timestamp.getTime();
-    }
-
-    tracker.currentStage = stage;
-    tracker.stages.push({
-      stage,
-      timestamp: now
-    });
-  }
-
-  private updateMetrics(context: RequestContext): void {
-    const duration = Date.now() - context.startTime.getTime();
-    const currentAvg = this.metrics.averageResponseTime;
-    const totalRequests = this.metrics.successfulRequests + this.metrics.failedRequests;
-
-    this.metrics.averageResponseTime = (currentAvg * (totalRequests - 1) + duration) / totalRequests;
-    this.metrics.errorRate = this.metrics.failedRequests / this.metrics.totalRequests;
-  }
-
-  async getHealthStatus(): Promise<SystemHealthStatus> {
-    const componentStatuses = await this.checkComponentHealth();
-
-    let overall: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
-    let unhealthyCount = 0;
-    let degradedCount = 0;
-
-    componentStatuses.forEach((status) => {
-      if (status.status === 'unhealthy') unhealthyCount++;
-      if (status.status === 'degraded') degradedCount++;
-    });
-
-    if (unhealthyCount > 0) {
-      overall = 'unhealthy';
-    } else if (degradedCount > 0) {
-      overall = 'degraded';
-    }
-
-    const uptime = Date.now() - this.startTime.getTime();
-
-    // Include message queue stats if queue is enabled
-    const metrics = { ...this.metrics };
-    if (this.messageQueue) {
-      const queueStats = this.messageQueue.getStats();
-      metrics.queueStats = {
-        totalMessages: queueStats.totalMessages,
-        queueDepth: queueStats.queueDepth,
-        processingRate: queueStats.processingRate,
-        averageWaitTime: queueStats.averageWaitTime,
-        activeWorkers: queueStats.activeWorkers,
-        messagesByPriority: Object.fromEntries(
-          Object.entries(queueStats.messagesByPriority).map(([key, value]) => [
-            MessagePriorityEnum[parseInt(key)] || key,
-            value
-          ])
-        )
-      };
-    }
-
-    return {
-      overall,
-      components: componentStatuses,
-      lastHealthCheck: new Date(),
-      uptime,
-      metrics
-    };
-  }
-
-  async checkComponentHealth(): Promise<Map<string, ComponentStatus>> {
-    const statuses = new Map<string, ComponentStatus>();
-
-    for (const [name, managed] of this.components) {
-      if (managed.state === ComponentState.READY && managed.component.getStatus) {
-        try {
-          const status = managed.component.getStatus();
-          statuses.set(name, status);
-        } catch (error) {
-          statuses.set(name, {
-            name,
-            status: 'unhealthy',
-            lastHealthCheck: new Date(),
-            metadata: { error: (error as Error).message }
-          });
-        }
-      } else {
-        statuses.set(name, {
-          name,
-          status: managed.state === ComponentState.READY ? 'healthy' : 'unhealthy',
-          lastHealthCheck: new Date(),
-          metadata: { state: managed.state }
-        });
-      }
-    }
-
-    return statuses;
-  }
-
-  getComponent<T>(componentName: string): T | undefined {
-    const managed = this.components.get(componentName);
-    return managed?.component as T;
-  }
-
-  async restartComponent(componentName: string): Promise<void> {
-    const managed = this.components.get(componentName);
-    if (!managed) {
-      throw new Error(`Component ${componentName} not found`);
-    }
-
-    console.log(`[SystemOrchestrator] Restarting component: ${componentName}`);
-
-    // Shutdown component
-    if (managed.component.shutdown) {
-      managed.state = ComponentState.STOPPING;
-      await managed.component.shutdown();
-      managed.state = ComponentState.STOPPED;
-    }
-
-    // Reinitialize component
-    managed.state = ComponentState.INITIALIZING;
-    managed.restartCount++;
-
-    try {
-      await managed.component.initialize();
-      managed.state = ComponentState.READY;
-      managed.lastError = undefined;
-      console.log(`[SystemOrchestrator] Component ${componentName} restarted successfully`);
-    } catch (error) {
-      managed.state = ComponentState.ERROR;
-      managed.lastError = error as Error;
-      throw error;
-    }
-  }
-
-  getMetrics(): SystemMetrics {
-    return { ...this.metrics };
-  }
-
-  resetMetrics(): void {
-    this.metrics = {
-      totalRequests: 0,
-      successfulRequests: 0,
-      failedRequests: 0,
-      averageResponseTime: 0,
-      activeRequests: this.metrics.activeRequests, // Keep active requests
-      errorRate: 0
-    };
-  }
-
-  async shutdown(): Promise<void> {
-    console.log('[SystemOrchestrator] Shutting down...');
-
-    // Emit system shutdown event
-    await this.eventEmitter.emit<SystemShutdownEvent>({
-      type: SystemEventType.SYSTEM_SHUTDOWN,
-      payload: {
-        reason: 'System shutdown requested'
-      }
-    });
-
-    // Stop message queue if running
-    if (this.messageQueue) {
-      console.log('[SystemOrchestrator] Stopping message queue...');
-      await this.messageQueue.stop();
-    }
-
-    // Shutdown components in reverse order
-    const sortedComponents = Array.from(this.components.values())
-      .sort((a, b) => b.initOrder - a.initOrder);
-
-    for (const managed of sortedComponents) {
-      if (managed.state === ComponentState.READY && managed.component.shutdown) {
-        try {
+          maxModerationAttempts,
+          hasToolResults: toolResults.length > 0,
           console.log(`[SystemOrchestrator] Shutting down component: ${managed.name}`);
           managed.state = ComponentState.STOPPING;
           await managed.component.shutdown();

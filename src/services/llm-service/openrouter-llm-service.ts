@@ -9,6 +9,8 @@
 import { injectable } from 'npm:inversify@7.5.4';
 import { CircuitBreaker } from '../../reliability/circuit-breaker.ts';
 import { getCircuitBreakerConfig } from '../../reliability/circuit-breaker-configs.ts';
+import { errorRecoveryService } from '../../services/error-recovery-service.ts';
+import { TelemetryService, LogLevel } from '../telemetry/index.ts';
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant';
@@ -31,6 +33,7 @@ export interface LLMConfig {
   models?: string[]; // Array of models for OpenRouter routing (max 3)
   temperature?: number;
   maxTokens?: number;
+  debugMode?: boolean;
 }
 
 interface OpenRouterRequest {
@@ -64,6 +67,7 @@ export class OpenRouterLlmService {
   private readonly apiKey: string;
   private readonly baseURL = 'https://openrouter.ai/api/v1/chat/completions';
   private readonly circuitBreaker: CircuitBreaker<any>;
+  private telemetry?: TelemetryService;
 
   // DeepSeek free models optimized for OpenRouter routing (max 3)
   private readonly defaultModels = [
@@ -76,6 +80,7 @@ export class OpenRouterLlmService {
     this.config = {
       models: config.models || this.defaultModels,
       temperature: 0.7,
+      debugMode: false,
       // Don't artificially limit free models - let them use their natural token limits
       ...config
     };
@@ -101,11 +106,31 @@ export class OpenRouterLlmService {
     );
   }
 
+  /**
+   * Set telemetry service for structured logging
+   */
+  setTelemetry(telemetry: TelemetryService): void {
+    this.telemetry = telemetry;
+  }
+
   public async init(): Promise<void> {
     console.log(`[OpenRouterLlmService] Starting initialization...`);
     console.log(`[OpenRouterLlmService] API key: ${this.apiKey.substring(0, 20)}...`);
     console.log(`[OpenRouterLlmService] Models for routing (${this.config.models?.length}): ${this.config.models?.join(', ')}`);
     console.log(`[OpenRouterLlmService] Using OpenRouter built-in model routing (no sequential racing needed)`);
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'OpenRouterLlmService',
+      phase: 'initialization',
+      message: 'LLM service initialized',
+      metadata: {
+        modelCount: this.config.models?.length || 0,
+        models: this.config.models || [],
+        hasApiKey: !!this.apiKey,
+        debugMode: this.config.debugMode
+      }
+    });
   }
 
   /**
@@ -115,9 +140,125 @@ export class OpenRouterLlmService {
     messages: LLMMessage[],
     options: Partial<LLMConfig> = {}
   ): Promise<LLMResponse> {
-    const mergedConfig = { ...this.config, ...options };
+    // Use telemetry wrapper if available
+    if (this.telemetry) {
+      return await this.telemetry.withTrace(
+        'OpenRouterLlmService.generateResponse',
+        async () => await this.generateResponseWithTelemetry(messages, options),
+        {
+          component: 'OpenRouterLlmService',
+          messageCount: messages.length,
+          hasSystemMessage: messages.some(m => m.role === 'system'),
+          models: (options.models || this.config.models || []).join(',')
+        }
+      );
+    }
 
-    // Ensure we have models for routing
+    // Fallback without telemetry
+    return await this.generateResponseWithoutTelemetry(messages, options);
+  }
+
+  /**
+   * Generate response with telemetry tracking
+   */
+  private async generateResponseWithTelemetry(
+    messages: LLMMessage[],
+    options: Partial<LLMConfig> = {}
+  ): Promise<LLMResponse> {
+    const mergedConfig = { ...this.config, ...options };
+    const models = mergedConfig.models || this.defaultModels;
+    const startTime = Date.now();
+
+    // Log request start with debug information
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'OpenRouterLlmService',
+      phase: 'llm_request_start',
+      message: 'Starting LLM request',
+      metadata: {
+        messageCount: messages.length,
+        models,
+        temperature: mergedConfig.temperature,
+        maxTokens: mergedConfig.maxTokens,
+        // Include prompts/responses only in debug mode
+        ...(mergedConfig.debugMode && {
+          messages: messages.map(m => ({ role: m.role, contentLength: m.content.length, contentPreview: m.content.substring(0, 100) }))
+        })
+      }
+    });
+
+    console.log(`[OpenRouterLlmService] Making request with OpenRouter routing: ${models.length} models`);
+
+    try {
+      // Use OpenRouter's built-in routing with the models array
+      const response = await this.makeOpenRouterRequest(messages, models, mergedConfig);
+      const processingTime = Date.now() - startTime;
+
+      console.log(`[OpenRouterLlmService] SUCCESS: Model ${response.model} responded in ${processingTime}ms`);
+      console.log(`[OpenRouterLlmService] Usage: ${response.usage.prompt_tokens} prompt + ${response.usage.completion_tokens} completion = ${response.usage.total_tokens} total tokens`);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'OpenRouterLlmService',
+        phase: 'llm_request_success',
+        message: 'LLM request completed successfully',
+        metadata: {
+          modelUsed: response.model,
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens,
+          processingTime,
+          // Include response content only in debug mode
+          ...(mergedConfig.debugMode && {
+            responseContentLength: response.choices[0].message.content.length,
+            responsePreview: response.choices[0].message.content.substring(0, 200)
+          })
+        },
+        duration: processingTime
+      });
+
+      return {
+        content: response.choices[0].message.content,
+        usage: {
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens
+        },
+        model: response.model,
+        processingTime
+      };
+
+    } catch (error) {
+      const processingTime = Date.now() - startTime;
+      console.error(`[OpenRouterLlmService] Request failed after ${processingTime}ms:`, error);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.ERROR,
+        component: 'OpenRouterLlmService',
+        phase: 'llm_request_error',
+        message: 'LLM request failed',
+        metadata: {
+          models,
+          processingTime,
+          errorMessage: error.message,
+          errorType: error.constructor.name
+        },
+        duration: processingTime,
+        error: error as Error
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Generate response without telemetry (fallback)
+   */
+  private async generateResponseWithoutTelemetry(
+    messages: LLMMessage[],
+    options: Partial<LLMConfig> = {}
+  ): Promise<LLMResponse> {
+    const mergedConfig = { ...this.config, ...options };
     const models = mergedConfig.models || this.defaultModels;
 
     console.log(`[OpenRouterLlmService] Making request with OpenRouter routing: ${models.length} models`);
@@ -158,8 +299,8 @@ export class OpenRouterLlmService {
     config: LLMConfig
   ): Promise<OpenRouterResponse> {
 
-    // Wrap the API call in circuit breaker
-    return await this.circuitBreaker.call(async () => {
+    // Use centralized error recovery service with circuit breaker
+    return await errorRecoveryService.executeWithRetry(async () => {
       const requestBody: OpenRouterRequest = {
         models: models, // Let OpenRouter handle the routing and fallbacks
         messages: messages,
@@ -181,21 +322,95 @@ export class OpenRouterLlmService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+        const error = new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'OpenRouterLlmService',
+          phase: 'api_error',
+          message: 'OpenRouter API request failed',
+          metadata: {
+            status: response.status,
+            statusText: response.statusText,
+            errorText,
+            models
+          },
+          error
+        });
+
+        throw error;
       }
 
       const data = await response.json();
 
       if (!data.choices || data.choices.length === 0) {
-        throw new Error('No response choices returned from OpenRouter');
+        const error = new Error('No response choices returned from OpenRouter');
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'OpenRouterLlmService',
+          phase: 'invalid_response',
+          message: 'Invalid response from OpenRouter - no choices',
+          metadata: { responseData: data },
+          error
+        });
+
+        throw error;
       }
 
       const choice = data.choices[0];
       if (!choice.message || !choice.message.content) {
-        throw new Error('Invalid response format from OpenRouter');
+        const error = new Error('Invalid response format from OpenRouter');
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'OpenRouterLlmService',
+          phase: 'invalid_response',
+          message: 'Invalid response format from OpenRouter',
+          metadata: { choice },
+          error
+        });
+
+        throw error;
       }
 
       return data;
+    }, {
+      maxAttempts: 3,
+      circuitBreakerKey: 'openrouter-llm-service',
+      onRetry: (error, attempt, delay) => {
+        console.log(`[OpenRouterLlmService] Retry attempt ${attempt} for error: ${error.message} (delay: ${delay}ms)`);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.WARN,
+          component: 'OpenRouterLlmService',
+          phase: 'retry_attempt',
+          message: 'Retrying LLM request',
+          metadata: {
+            attempt,
+            maxAttempts: 3,
+            delay,
+            errorMessage: error.message,
+            models
+          }
+        });
+      },
+      onFailure: (error, attempts) => {
+        console.error(`[OpenRouterLlmService] Failed after ${attempts} attempts: ${error.message}`);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'OpenRouterLlmService',
+          phase: 'final_failure',
+          message: 'LLM request failed after all retries',
+          metadata: {
+            totalAttempts: attempts,
+            finalError: error.message,
+            models
+          },
+          error
+        });
+      }
     });
   }
 
@@ -208,6 +423,20 @@ export class OpenRouterLlmService {
   ): Promise<AsyncIterableIterator<string>> {
     const mergedConfig = { ...this.config, ...options };
     const models = mergedConfig.models || this.defaultModels;
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'OpenRouterLlmService',
+      phase: 'stream_request_start',
+      message: 'Starting streaming LLM request',
+      metadata: {
+        messageCount: messages.length,
+        models,
+        ...(mergedConfig.debugMode && {
+          messages: messages.map(m => ({ role: m.role, contentLength: m.content.length }))
+        })
+      }
+    });
 
     const requestBody: OpenRouterRequest = {
       models: models,
@@ -231,16 +460,63 @@ export class OpenRouterLlmService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+        const error = new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'OpenRouterLlmService',
+          phase: 'stream_request_error',
+          message: 'Streaming LLM request failed',
+          metadata: {
+            status: response.status,
+            errorText,
+            models
+          },
+          error
+        });
+
+        throw error;
       }
 
       if (!response.body) {
-        throw new Error('No response body for streaming');
+        const error = new Error('No response body for streaming');
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'OpenRouterLlmService',
+          phase: 'stream_request_error',
+          message: 'No response body for streaming',
+          metadata: { models },
+          error
+        });
+
+        throw error;
       }
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'OpenRouterLlmService',
+        phase: 'stream_request_success',
+        message: 'Streaming LLM request started successfully',
+        metadata: { models }
+      });
 
       return this.parseStreamResponse(response.body);
     } catch (error) {
       console.error('[OpenRouterLlmService] Generate stream response error:', error);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.ERROR,
+        component: 'OpenRouterLlmService',
+        phase: 'stream_request_error',
+        message: 'Failed to generate streaming LLM response',
+        metadata: {
+          errorMessage: error.message,
+          models
+        },
+        error: error as Error
+      });
+
       throw new Error(`Failed to generate streaming LLM response: ${error.message}`);
     }
   }
@@ -280,6 +556,18 @@ export class OpenRouterLlmService {
             }
           } catch (parseError) {
             console.warn('[OpenRouterLlmService] Failed to parse streaming chunk:', parseError);
+
+            this.telemetry?.logStructured({
+              level: LogLevel.WARN,
+              component: 'OpenRouterLlmService',
+              phase: 'stream_parse_error',
+              message: 'Failed to parse streaming chunk',
+              metadata: {
+                line: trimmed,
+                parseError: parseError.message
+              }
+            });
+
             continue;
           }
         }
@@ -300,6 +588,17 @@ export class OpenRouterLlmService {
       console.warn('[OpenRouterLlmService] Models array truncated to 3 (OpenRouter limit)');
       this.config.models = this.config.models.slice(0, 3);
     }
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'OpenRouterLlmService',
+      phase: 'config_update',
+      message: 'LLM service configuration updated',
+      metadata: {
+        newConfig: config,
+        currentModelCount: this.config.models?.length || 0
+      }
+    });
   }
 
   /**
@@ -325,12 +624,44 @@ export class OpenRouterLlmService {
    */
   async testConnection(): Promise<boolean> {
     try {
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'OpenRouterLlmService',
+        phase: 'connection_test_start',
+        message: 'Starting connection test',
+        metadata: {}
+      });
+
       const response = await this.generateResponse([
         { role: 'user', content: 'Test connection. Reply with "OK".' }
       ]);
-      return response.content.trim().toLowerCase().includes('ok');
+      const success = response.content.trim().toLowerCase().includes('ok');
+
+      this.telemetry?.logStructured({
+        level: success ? LogLevel.INFO : LogLevel.WARN,
+        component: 'OpenRouterLlmService',
+        phase: 'connection_test_result',
+        message: success ? 'Connection test successful' : 'Connection test failed',
+        metadata: {
+          success,
+          responseContent: response.content,
+          model: response.model
+        }
+      });
+
+      return success;
     } catch (error) {
       console.error('[OpenRouterLlmService] Connection test failed:', error);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.ERROR,
+        component: 'OpenRouterLlmService',
+        phase: 'connection_test_error',
+        message: 'Connection test failed with error',
+        metadata: { errorMessage: error.message },
+        error: error as Error
+      });
+
       return false;
     }
   }
@@ -339,7 +670,17 @@ export class OpenRouterLlmService {
    * Get circuit breaker status
    */
   getCircuitBreakerStatus() {
-    return this.circuitBreaker.getStatus();
+    const status = this.circuitBreaker.getStatus();
+
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'OpenRouterLlmService',
+      phase: 'circuit_breaker_status',
+      message: 'Circuit breaker status checked',
+      metadata: { status }
+    });
+
+    return status;
   }
 
   /**
@@ -348,6 +689,14 @@ export class OpenRouterLlmService {
   resetCircuitBreaker(): void {
     this.circuitBreaker.reset();
     console.log('[OpenRouterLlmService] Circuit breaker reset');
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'OpenRouterLlmService',
+      phase: 'circuit_breaker_reset',
+      message: 'Circuit breaker reset',
+      metadata: {}
+    });
   }
 
   /**
@@ -367,5 +716,16 @@ export class OpenRouterLlmService {
     }
     this.config.models = models;
     console.log(`[OpenRouterLlmService] Updated routing models: ${models.join(', ')}`);
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'OpenRouterLlmService',
+      phase: 'models_update',
+      message: 'Routing models updated',
+      metadata: {
+        newModels: models,
+        modelCount: models.length
+      }
+    });
   }
 }

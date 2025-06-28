@@ -13,6 +13,7 @@ import {
   CategorizedError,
   IEventEmitter
 } from '../../interfaces/component-interfaces.ts';
+import { errorRecoveryService } from '../../services/error-recovery-service.ts';
 import {
   EventType,
   SystemEvent
@@ -157,16 +158,8 @@ export class ErrorHandler implements IErrorHandler {
   }
 
   isRetryableError(error: Error): boolean {
-    const categorizedError = this.categorizeError(error);
-
-    const retryableCategories = [
-      ErrorCategory.NETWORK_TIMEOUT,
-      ErrorCategory.NETWORK_ERROR,
-      ErrorCategory.RATE_LIMIT,
-      ErrorCategory.TEMPORARY_FAILURE
-    ];
-
-    return retryableCategories.includes(categorizedError.category);
+    // Delegate to centralized error recovery service
+    return errorRecoveryService.shouldRetry(error, 1);
   }
 
   getRetryStrategy(error: Error, operation: string): RetryStrategy {

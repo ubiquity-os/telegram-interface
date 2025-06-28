@@ -1,10 +1,13 @@
 /**
- * State machine implementation for the Decision Engine
+ * Simplified State machine implementation for the Decision Engine
+ * Phase 1.1: Reduce states to READY, PROCESSING, COMPLETED, ERROR
+ * Replace intermediate states with phase metadata
  */
 
 import {
   StateMachineContext,
-  StateTransition
+  StateTransition,
+  ProcessingPhase
 } from './types.ts';
 
 import {
@@ -12,82 +15,56 @@ import {
 } from '../../interfaces/component-interfaces.ts';
 
 /**
- * Decision events for state machine transitions
+ * Decision events for simplified state machine transitions
  */
 export enum DecisionEvent {
   MESSAGE_RECEIVED = 'message_received',
-  ANALYSIS_COMPLETE = 'analysis_complete',
-  TOOLS_REQUIRED = 'tools_required',
-  DIRECT_RESPONSE = 'direct_response',
-  TOOLS_COMPLETE = 'tools_complete',
-  RESPONSE_GENERATED = 'response_generated',
-  VALIDATION_PASSED = 'validation_passed',
-  VALIDATION_FAILED = 'validation_failed',
+  PHASE_COMPLETE = 'phase_complete',
+  PROCESSING_COMPLETE = 'processing_complete',
   ERROR_OCCURRED = 'error_occurred',
   RESET = 'reset'
 }
 
 /**
- * State machine for managing decision flow
+ * Simplified state machine for managing decision flow
  */
 export class DecisionStateMachine {
   private contexts = new Map<number, StateMachineContext>();
 
   /**
-   * Valid state transitions
+   * Valid state transitions for simplified state machine
    */
   private static readonly transitions: Record<DecisionState, Partial<Record<DecisionEvent, DecisionState>>> = {
-    [DecisionState.IDLE]: {
-      [DecisionEvent.MESSAGE_RECEIVED]: DecisionState.MESSAGE_RECEIVED,
-      [DecisionEvent.RESET]: DecisionState.IDLE
+    [DecisionState.READY]: {
+      [DecisionEvent.MESSAGE_RECEIVED]: DecisionState.PROCESSING,
+      [DecisionEvent.RESET]: DecisionState.READY
     },
-    [DecisionState.MESSAGE_RECEIVED]: {
-      [DecisionEvent.ANALYSIS_COMPLETE]: DecisionState.PREPROCESSING,
+    [DecisionState.PROCESSING]: {
+      [DecisionEvent.PHASE_COMPLETE]: DecisionState.PROCESSING, // Stay in processing, change phase
+      [DecisionEvent.PROCESSING_COMPLETE]: DecisionState.COMPLETED,
       [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
-      [DecisionEvent.RESET]: DecisionState.IDLE
+      [DecisionEvent.RESET]: DecisionState.READY
     },
-    [DecisionState.PREPROCESSING]: {
-      [DecisionEvent.ANALYSIS_COMPLETE]: DecisionState.DECISION_POINT,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
-      [DecisionEvent.RESET]: DecisionState.IDLE
-    },
-    [DecisionState.DECISION_POINT]: {
-      [DecisionEvent.TOOLS_REQUIRED]: DecisionState.TOOL_REQUIRED,
-      [DecisionEvent.DIRECT_RESPONSE]: DecisionState.DIRECT_RESPONSE,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
-      [DecisionEvent.RESET]: DecisionState.IDLE
-    },
-    [DecisionState.TOOL_REQUIRED]: {
-      [DecisionEvent.TOOLS_COMPLETE]: DecisionState.RESPONSE_GENERATION,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
-      [DecisionEvent.RESET]: DecisionState.IDLE
-    },
-    [DecisionState.DIRECT_RESPONSE]: {
-      [DecisionEvent.RESPONSE_GENERATED]: DecisionState.RESPONSE_GENERATION,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
-      [DecisionEvent.RESET]: DecisionState.IDLE
-    },
-    [DecisionState.RESPONSE_GENERATION]: {
-      [DecisionEvent.VALIDATION_PASSED]: DecisionState.VALIDATION,
-      [DecisionEvent.VALIDATION_FAILED]: DecisionState.RESPONSE_GENERATION,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
-      [DecisionEvent.RESET]: DecisionState.IDLE
-    },
-    [DecisionState.VALIDATION]: {
-      [DecisionEvent.VALIDATION_PASSED]: DecisionState.SEND_RESPONSE,
-      [DecisionEvent.VALIDATION_FAILED]: DecisionState.RESPONSE_GENERATION,
-      [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR,
-      [DecisionEvent.RESET]: DecisionState.IDLE
-    },
-    [DecisionState.SEND_RESPONSE]: {
-      [DecisionEvent.RESET]: DecisionState.IDLE,
+    [DecisionState.COMPLETED]: {
+      [DecisionEvent.MESSAGE_RECEIVED]: DecisionState.PROCESSING,
+      [DecisionEvent.RESET]: DecisionState.READY,
       [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR
     },
     [DecisionState.ERROR]: {
-      [DecisionEvent.RESET]: DecisionState.IDLE,
-      [DecisionEvent.MESSAGE_RECEIVED]: DecisionState.MESSAGE_RECEIVED,
+      [DecisionEvent.RESET]: DecisionState.READY,
+      [DecisionEvent.MESSAGE_RECEIVED]: DecisionState.PROCESSING,
       [DecisionEvent.ERROR_OCCURRED]: DecisionState.ERROR  // Allow error->error for multiple errors
     }
+  };
+
+  /**
+   * Valid phase transitions within PROCESSING state
+   */
+  private static readonly phaseTransitions: Record<ProcessingPhase, ProcessingPhase[]> = {
+    'analysis': ['decision', 'generation'], // Can skip decision for simple responses
+    'decision': ['tool_execution', 'generation'],
+    'tool_execution': ['generation'],
+    'generation': [] // Final phase
   };
 
   /**
@@ -95,7 +72,18 @@ export class DecisionStateMachine {
    */
   getCurrentState(chatId: number): DecisionState {
     const context = this.contexts.get(chatId);
-    return context?.currentState ?? DecisionState.IDLE;
+    return context?.currentState ?? DecisionState.READY;
+  }
+
+  /**
+   * Get current processing phase for a chat (if in PROCESSING state)
+   */
+  getCurrentPhase(chatId: number): ProcessingPhase | null {
+    const context = this.contexts.get(chatId);
+    if (context?.currentState === DecisionState.PROCESSING) {
+      return context.currentPhase ?? null;
+    }
+    return null;
   }
 
   /**
@@ -140,6 +128,11 @@ export class DecisionStateMachine {
     context.lastTransition = new Date();
     context.transitionHistory.push(transition);
 
+    // Clear phase when leaving PROCESSING state
+    if (nextState !== DecisionState.PROCESSING) {
+      context.currentPhase = undefined;
+    }
+
     // Keep only last 10 transitions
     if (context.transitionHistory.length > 10) {
       context.transitionHistory = context.transitionHistory.slice(-10);
@@ -147,6 +140,72 @@ export class DecisionStateMachine {
 
     this.contexts.set(chatId, context);
     return nextState;
+  }
+
+  /**
+   * Transition to a new processing phase (only valid when in PROCESSING state)
+   */
+  transitionToPhase(chatId: number, newPhase: ProcessingPhase, metadata?: Record<string, any>): void {
+    const context = this.contexts.get(chatId);
+
+    if (!context || context.currentState !== DecisionState.PROCESSING) {
+      throw new Error(`Cannot transition to phase ${newPhase}: not in PROCESSING state`);
+    }
+
+    const currentPhase = context.currentPhase;
+
+    // If no current phase, allow setting initial phase
+    if (!currentPhase) {
+      console.log(`[StateMachine] PHASE TRANSITION: ChatId=${chatId}, InitialPhase=${newPhase}`);
+      context.currentPhase = newPhase;
+      context.stateData = { ...context.stateData, ...metadata };
+      this.contexts.set(chatId, context);
+      return;
+    }
+
+    // Validate phase transition
+    const validPhases = DecisionStateMachine.phaseTransitions[currentPhase];
+    if (!validPhases.includes(newPhase)) {
+      throw new Error(
+        `Invalid phase transition: ${currentPhase} -> ${newPhase}. Valid transitions: ${validPhases.join(', ')}`
+      );
+    }
+
+    console.log(`[StateMachine] PHASE TRANSITION: ChatId=${chatId}, ${currentPhase} -> ${newPhase}`);
+
+    context.currentPhase = newPhase;
+    context.stateData = { ...context.stateData, ...metadata };
+    context.lastTransition = new Date();
+
+    // Add phase transition to history
+    const phaseTransition: StateTransition = {
+      from: DecisionState.PROCESSING,
+      to: DecisionState.PROCESSING,
+      timestamp: new Date(),
+      trigger: `phase_${newPhase}`,
+      metadata: { ...metadata, phase: newPhase, previousPhase: currentPhase }
+    };
+    context.transitionHistory.push(phaseTransition);
+
+    this.contexts.set(chatId, context);
+  }
+
+  /**
+   * Start processing with initial phase
+   */
+  startProcessing(chatId: number, initialPhase: ProcessingPhase = 'analysis', metadata?: Record<string, any>): void {
+    // First transition to PROCESSING state
+    this.transition(chatId, DecisionEvent.MESSAGE_RECEIVED, metadata);
+
+    // Then set the initial phase
+    this.transitionToPhase(chatId, initialPhase, metadata);
+  }
+
+  /**
+   * Complete processing and transition to COMPLETED
+   */
+  completeProcessing(chatId: number, metadata?: Record<string, any>): void {
+    this.transition(chatId, DecisionEvent.PROCESSING_COMPLETE, metadata);
   }
 
   /**
@@ -158,11 +217,17 @@ export class DecisionStateMachine {
     context.currentState = state;
     context.lastTransition = new Date();
     context.stateData = { ...context.stateData, ...metadata };
+
+    // Clear phase if not in PROCESSING
+    if (state !== DecisionState.PROCESSING) {
+      context.currentPhase = undefined;
+    }
+
     this.contexts.set(chatId, context);
   }
 
   /**
-   * Reset state to IDLE
+   * Reset state to READY
    */
   reset(chatId: number): void {
     this.transition(chatId, DecisionEvent.RESET);
@@ -192,6 +257,25 @@ export class DecisionStateMachine {
     const currentState = this.getCurrentState(chatId);
     const validTransitions = DecisionStateMachine.transitions[currentState];
     return validTransitions?.[event] !== undefined;
+  }
+
+  /**
+   * Check if phase transition is valid
+   */
+  canTransitionToPhase(chatId: number, newPhase: ProcessingPhase): boolean {
+    const context = this.contexts.get(chatId);
+
+    if (!context || context.currentState !== DecisionState.PROCESSING) {
+      return false;
+    }
+
+    const currentPhase = context.currentPhase;
+    if (!currentPhase) {
+      return true; // Can set initial phase
+    }
+
+    const validPhases = DecisionStateMachine.phaseTransitions[currentPhase];
+    return validPhases.includes(newPhase);
   }
 
   /**
@@ -238,6 +322,28 @@ export class DecisionStateMachine {
   }
 
   /**
+   * Get phase distribution for monitoring (only for PROCESSING state)
+   */
+  getPhaseDistribution(): Record<ProcessingPhase, number> {
+    const distribution = {} as Record<ProcessingPhase, number>;
+
+    // Initialize all phases to 0
+    const phases: ProcessingPhase[] = ['analysis', 'decision', 'tool_execution', 'generation'];
+    for (const phase of phases) {
+      distribution[phase] = 0;
+    }
+
+    // Count current phases in PROCESSING state
+    for (const context of this.contexts.values()) {
+      if (context.currentState === DecisionState.PROCESSING && context.currentPhase) {
+        distribution[context.currentPhase]++;
+      }
+    }
+
+    return distribution;
+  }
+
+  /**
    * Check if state exists for a chat
    */
   hasState(chatId: number): boolean {
@@ -245,7 +351,7 @@ export class DecisionStateMachine {
   }
 
   /**
-   * Initialize chat state to IDLE
+   * Initialize chat state to READY
    */
   initializeChatState(chatId: number): void {
     const context = this.createContext(chatId);
@@ -265,7 +371,7 @@ export class DecisionStateMachine {
   private createContext(chatId: number): StateMachineContext {
     return {
       chatId,
-      currentState: DecisionState.IDLE,
+      currentState: DecisionState.READY,
       stateData: {},
       lastTransition: new Date(),
       transitionHistory: []

@@ -32,12 +32,27 @@ export type {
 };
 
 /**
- * State machine context for decision tracking
+ * Processing phases for the PROCESSING state
+ */
+export type ProcessingPhase = 'analysis' | 'decision' | 'tool_execution' | 'generation';
+
+/**
+ * Processing state with phase metadata
+ */
+export interface ProcessingState {
+  state: 'PROCESSING';
+  phase: ProcessingPhase;
+  metadata: Record<string, any>;
+}
+
+/**
+ * State machine context for decision tracking - Simplified
  */
 export interface StateMachineContext {
   chatId: number;
   currentState: DecisionState;
   previousState?: DecisionState;
+  currentPhase?: ProcessingPhase;
   stateData: Record<string, any>;
   lastTransition: Date;
   transitionHistory: StateTransition[];

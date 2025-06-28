@@ -1,5 +1,6 @@
 /**
- * Decision Engine implementation
+ * Decision Engine implementation with Simplified State Machine
+ * Phase 1.1: Uses READY/PROCESSING/COMPLETED/ERROR states with phase metadata
  */
 
 import { injectable, inject } from 'npm:inversify@7.5.4';
@@ -8,9 +9,11 @@ import { DecisionStateMachine, DecisionEvent } from './state-machine.ts';
 import {
   DecisionEngineConfig,
   ToolExecutionContext,
-  DecisionMetrics
+  DecisionMetrics,
+  ProcessingPhase
 } from './types.ts';
 import { StatePersistence, DenoKvStatePersistence, MemoryStatePersistence } from './state-persistence.ts';
+import { ErrorRecoveryService } from '../../services/error-recovery-service.ts';
 
 import type {
   IDecisionEngine,
@@ -34,9 +37,10 @@ import {
 } from '../../interfaces/message-types.ts';
 
 import { createEventEmitter, SystemEventType } from '../../services/event-bus/index.ts';
+import { TelemetryService, LogLevel, getTelemetry } from '../../services/telemetry/index.ts';
 
 /**
- * Central orchestrator for request handling and decision flow
+ * Central orchestrator for request handling and decision flow with simplified state machine
  */
 @injectable()
 export class DecisionEngine implements IDecisionEngine {
@@ -46,10 +50,12 @@ export class DecisionEngine implements IDecisionEngine {
   private config: DecisionEngineConfig;
   private contextManager: IContextManager;
   private errorHandler: IErrorHandler;
+  private errorRecoveryService: ErrorRecoveryService;
   private metrics: DecisionMetrics;
   private isInitialized = false;
   private eventEmitter: ReturnType<typeof createEventEmitter>;
   private statePersistence?: StatePersistence;
+  private telemetry?: TelemetryService;
 
   constructor(
     @inject(TYPES.ContextManager) contextManager: IContextManager,
@@ -58,6 +64,7 @@ export class DecisionEngine implements IDecisionEngine {
   ) {
     this.contextManager = contextManager;
     this.errorHandler = errorHandler;
+    this.errorRecoveryService = new ErrorRecoveryService();
     this.config = {
       maxStateRetention: 1000,
       defaultTimeout: 30000,
@@ -146,6 +153,7 @@ export class DecisionEngine implements IDecisionEngine {
   getStatus(): ComponentStatus {
     const activeChats = this.stateMachine.getActiveChats().length;
     const stateDistribution = this.stateMachine.getStateDistribution();
+    const phaseDistribution = this.stateMachine.getPhaseDistribution();
 
     return {
       name: this.name,
@@ -154,15 +162,294 @@ export class DecisionEngine implements IDecisionEngine {
       metadata: {
         activeChats,
         stateDistribution,
+        phaseDistribution,
         metrics: this.metrics
       }
     };
   }
 
   /**
-   * Make a decision based on the context
+   * Set telemetry service for structured logging
+   */
+  setTelemetry(telemetry: TelemetryService): void {
+    this.telemetry = telemetry;
+  }
+
+  /**
+   * Make a decision based on the context using simplified state machine
    */
   async makeDecision(context: DecisionContext): Promise<Decision> {
+    // Use telemetry wrapper if available
+    if (this.telemetry) {
+      return await this.telemetry.withTrace(
+        'DecisionEngine.makeDecision',
+        async () => await this.makeDecisionWithTelemetry(context),
+        {
+          component: 'DecisionEngine',
+          chatId: context.message.chatId.toString(),
+          messageId: context.message.messageId?.toString(),
+          intent: context.analysis.intent,
+          confidence: context.analysis.confidence
+        }
+      );
+    }
+
+    // Fallback to original method without telemetry
+    return await this.makeDecisionWithoutTelemetry(context);
+  }
+
+  /**
+   * Make decision with telemetry tracking
+   */
+  private async makeDecisionWithTelemetry(context: DecisionContext): Promise<Decision> {
+    const startTime = Date.now();
+    const chatId = context.message.chatId;
+
+    try {
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'DecisionEngine',
+        phase: 'decision_start',
+        message: 'Starting decision process',
+        metadata: {
+          chatId: chatId.toString(),
+          messageId: context.message.messageId?.toString(),
+          intent: context.analysis.intent,
+          confidence: context.analysis.confidence,
+          currentState: this.stateMachine.getCurrentState(chatId)
+        }
+      });
+
+      console.log(`[DecisionEngine] makeDecision() STARTED - ChatId: ${chatId}, Initial state: ${this.stateMachine.getCurrentState(chatId)}`);
+
+      // Load persisted state if available
+      if (this.statePersistence && !this.stateMachine.hasState(chatId)) {
+        const persistedState = await this.statePersistence.loadState(chatId);
+        if (persistedState) {
+          // Restore state to state machine
+          this.stateMachine.restoreState(chatId, persistedState);
+          this.telemetry?.logStructured({
+            level: LogLevel.INFO,
+            component: 'DecisionEngine',
+            phase: 'state_restoration',
+            message: 'Restored persisted state',
+            metadata: { chatId: chatId.toString(), restoredState: persistedState }
+          });
+          if (this.config.debugMode) {
+            console.log(`[DecisionEngine] Restored persisted state for chat ${chatId}`);
+          }
+        }
+      }
+
+      // Ensure this chat has an active state
+      if (!this.stateMachine.hasState(chatId)) {
+        this.stateMachine.initializeChatState(chatId);
+        this.telemetry?.logStructured({
+          level: LogLevel.INFO,
+          component: 'DecisionEngine',
+          phase: 'state_initialization',
+          message: 'Initialized new chat state',
+          metadata: { chatId: chatId.toString() }
+        });
+      }
+
+      // Update metrics
+      this.metrics.totalDecisions++;
+
+      // Store the decision context in state data
+      this.stateMachine.setStateData(chatId, 'decisionContext', context);
+
+      // Start processing with analysis phase
+      this.stateMachine.startProcessing(chatId, 'analysis', {
+        messageId: context.message.messageId,
+        userId: context.message.userId
+      });
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'DecisionEngine',
+        phase: 'state_transition',
+        message: 'Transitioned to analysis phase',
+        metadata: {
+          chatId: chatId.toString(),
+          currentState: this.stateMachine.getCurrentState(chatId),
+          currentPhase: this.stateMachine.getCurrentPhase(chatId)
+        }
+      });
+
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
+
+      // Perform analysis and decision making with error recovery
+      console.log(`[DecisionEngine] Starting analysis phase - Current state: ${this.stateMachine.getCurrentState(chatId)}, Phase: ${this.stateMachine.getCurrentPhase(chatId)}`);
+      const decision = await this.errorRecoveryService.executeWithRetry(
+        async () => await this.analyzeAndDecide(context),
+        {
+          maxAttempts: 3,
+          circuitBreakerKey: 'decision-engine-analysis',
+          onRetry: (error, attempt, delay) => {
+            console.log(`[DecisionEngine] Retrying analysis phase (attempt ${attempt}/${3}): ${error.message}`);
+            this.telemetry?.logStructured({
+              level: LogLevel.WARN,
+              component: 'DecisionEngine',
+              phase: 'retry_attempt',
+              message: 'Retrying analysis phase',
+              metadata: {
+                chatId: chatId.toString(),
+                attempt,
+                maxAttempts: 3,
+                error: error.message
+              }
+            });
+          }
+        }
+      );
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'DecisionEngine',
+        phase: 'decision_complete',
+        message: 'Decision made successfully',
+        metadata: {
+          chatId: chatId.toString(),
+          action: decision.action,
+          toolCallsCount: decision.toolCalls?.length ?? 0,
+          responseStrategy: decision.responseStrategy?.type,
+          currentState: this.stateMachine.getCurrentState(chatId),
+          currentPhase: this.stateMachine.getCurrentPhase(chatId)
+        }
+      });
+
+      console.log(`[DecisionEngine] Decision made:`, {
+        action: decision.action,
+        toolCallsCount: decision.toolCalls?.length ?? 0,
+        responseStrategy: decision.responseStrategy?.type,
+        currentState: this.stateMachine.getCurrentState(chatId),
+        currentPhase: this.stateMachine.getCurrentPhase(chatId)
+      });
+
+      // Complete processing
+      this.stateMachine.completeProcessing(chatId, {
+        decision: decision.action,
+        hasToolCalls: !!decision.toolCalls?.length
+      });
+
+      // Save final state
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
+
+      console.log(`[DecisionEngine] Final state after decision: ${this.stateMachine.getCurrentState(chatId)}`);
+
+      // Update metrics
+      const duration = Date.now() - startTime;
+      this.updateAverageDecisionTime(duration);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'DecisionEngine',
+        phase: 'decision_end',
+        message: 'Decision process completed',
+        metadata: {
+          chatId: chatId.toString(),
+          duration,
+          finalState: this.stateMachine.getCurrentState(chatId)
+        },
+        duration
+      });
+
+      if (decision.toolCalls && decision.toolCalls.length > 0) {
+        this.metrics.toolUsageRate = this.calculateToolUsageRate();
+      }
+
+      // Emit decision made event
+      await this.eventEmitter.emit({
+        type: SystemEventType.DECISION_MADE,
+        payload: {
+          message: context.message,
+          decision,
+          requestId: context.message.messageId.toString()
+        }
+      });
+
+      return decision;
+
+    } catch (error) {
+      // Handle error with simplified state machine
+      const currentState = this.stateMachine.getCurrentState(chatId);
+      console.log(`[DecisionEngine] Error occurred in state: ${currentState}, Phase: ${this.stateMachine.getCurrentPhase(chatId)}`);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.ERROR,
+        component: 'DecisionEngine',
+        phase: 'error_occurred',
+        message: 'Error in decision process',
+        metadata: {
+          chatId: chatId.toString(),
+          currentState,
+          currentPhase: this.stateMachine.getCurrentPhase(chatId),
+          error: error.message
+        },
+        error: error as Error
+      });
+
+      // Transition to ERROR state
+      console.log(`[DecisionEngine] Transitioning to ERROR state due to: ${error.message}`);
+      this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
+        error: error.message,
+        errorPhase: this.stateMachine.getCurrentPhase(chatId)
+      });
+
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
+
+      this.metrics.errorRate = this.calculateErrorRate();
+
+      // Emit component error event
+      await this.eventEmitter.emit({
+        type: SystemEventType.COMPONENT_ERROR,
+        payload: {
+          componentName: this.name,
+          error: error as Error
+        },
+        metadata: {
+          operation: 'makeDecision',
+          chatId,
+          messageId: context.message.messageId
+        }
+      });
+
+      if (this.errorHandler) {
+        const errorResult = await this.errorHandler.handleError(error as Error, {
+          operation: 'makeDecision',
+          component: this.name,
+          chatId,
+          metadata: { context }
+        });
+
+        if (errorResult.handled) {
+          return {
+            action: 'error',
+            metadata: {
+              error: error.message,
+              userMessage: errorResult.userMessage
+            }
+          };
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Make decision without telemetry (fallback)
+   */
+  private async makeDecisionWithoutTelemetry(context: DecisionContext): Promise<Decision> {
     const startTime = Date.now();
     const chatId = context.message.chatId;
 
@@ -189,9 +476,11 @@ export class DecisionEngine implements IDecisionEngine {
       // Update metrics
       this.metrics.totalDecisions++;
 
+      // Store the decision context in state data
+      this.stateMachine.setStateData(chatId, 'decisionContext', context);
 
-      // Transition to MESSAGE_RECEIVED state
-      this.stateMachine.transition(chatId, DecisionEvent.MESSAGE_RECEIVED, {
+      // Start processing with analysis phase
+      this.stateMachine.startProcessing(chatId, 'analysis', {
         messageId: context.message.messageId,
         userId: context.message.userId
       });
@@ -201,29 +490,37 @@ export class DecisionEngine implements IDecisionEngine {
         await this.saveCurrentState(chatId);
       }
 
-      // Store the decision context in state data
-      this.stateMachine.setStateData(chatId, 'decisionContext', context);
-
-      // Transition to PREPROCESSING
-      this.stateMachine.transition(chatId, DecisionEvent.ANALYSIS_COMPLETE);
-
-      // Save state after transition
-      if (this.statePersistence) {
-        await this.saveCurrentState(chatId);
-      }
-
-      // Make the actual decision
-      console.log(`[DecisionEngine] About to analyze and decide - Current state: ${this.stateMachine.getCurrentState(chatId)}`);
-      const decision = await this.analyzeAndDecide(context);
+      // Perform analysis and decision making with error recovery
+      console.log(`[DecisionEngine] Starting analysis phase - Current state: ${this.stateMachine.getCurrentState(chatId)}, Phase: ${this.stateMachine.getCurrentPhase(chatId)}`);
+      const decision = await this.errorRecoveryService.executeWithRetry(
+        async () => await this.analyzeAndDecide(context),
+        {
+          maxAttempts: 3,
+          circuitBreakerKey: 'decision-engine-analysis',
+          onRetry: (error, attempt, delay) => {
+            console.log(`[DecisionEngine] Retrying analysis phase (attempt ${attempt}/${3}): ${error.message}`);
+          }
+        }
+      );
       console.log(`[DecisionEngine] Decision made:`, {
         action: decision.action,
         toolCallsCount: decision.toolCalls?.length ?? 0,
         responseStrategy: decision.responseStrategy?.type,
-        currentState: this.stateMachine.getCurrentState(chatId)
+        currentState: this.stateMachine.getCurrentState(chatId),
+        currentPhase: this.stateMachine.getCurrentPhase(chatId)
       });
 
-      // The analyzeAndDecide method should have already handled the state transitions
-      // No additional transitions needed here since analyzeAndDecide handles the flow
+      // Complete processing
+      this.stateMachine.completeProcessing(chatId, {
+        decision: decision.action,
+        hasToolCalls: !!decision.toolCalls?.length
+      });
+
+      // Save final state
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
+
       console.log(`[DecisionEngine] Final state after decision: ${this.stateMachine.getCurrentState(chatId)}`);
 
       // Update metrics
@@ -247,21 +544,16 @@ export class DecisionEngine implements IDecisionEngine {
       return decision;
 
     } catch (error) {
-      // DIAGNOSTIC: Log error transition attempt
+      // Handle error with simplified state machine
       const currentState = this.stateMachine.getCurrentState(chatId);
-      console.log(`[DecisionEngine] DIAGNOSTIC - Error occurred in state: ${currentState}`);
-      console.log(`[DecisionEngine] DIAGNOSTIC - Attempting to transition ERROR_OCCURRED from ${currentState}`);
+      console.log(`[DecisionEngine] Error occurred in state: ${currentState}, Phase: ${this.stateMachine.getCurrentPhase(chatId)}`);
 
-      // FIX: Only transition to error if not already in error state
-      if (currentState !== DecisionState.ERROR) {
-        console.log(`[DecisionEngine] Transitioning to ERROR state due to: ${error.message}`);
-        this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
-          error: error.message
-        });
-      } else {
-        console.log(`[DecisionEngine] Already in ERROR state, resetting to IDLE instead`);
-        this.stateMachine.transition(chatId, DecisionEvent.RESET);
-      }
+      // Transition to ERROR state
+      console.log(`[DecisionEngine] Transitioning to ERROR state due to: ${error.message}`);
+      this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
+        error: error.message,
+        errorPhase: this.stateMachine.getCurrentPhase(chatId)
+      });
 
       // Save state after transition
       if (this.statePersistence) {
@@ -320,7 +612,7 @@ export class DecisionEngine implements IDecisionEngine {
   }
 
   /**
-   * Process tool execution results
+   * Process tool execution results using simplified state machine
    */
   async processToolResults(results: ToolResult[]): Promise<Decision> {
     const activeChats = this.stateMachine.getActiveChats();
@@ -334,22 +626,24 @@ export class DecisionEngine implements IDecisionEngine {
     const chatId = activeChats[0];
 
     try {
-      // Transition to response generation
-      this.stateMachine.transition(chatId, DecisionEvent.TOOLS_COMPLETE, {
-        resultCount: results.length,
-        successCount: results.filter(r => r.success).length
-      });
-
-      // Save state after transition
-      if (this.statePersistence) {
-        await this.saveCurrentState(chatId);
-      }
-
       // Get the original decision context
       const originalContext = this.stateMachine.getStateData(chatId, 'decisionContext') as DecisionContext;
 
       if (!originalContext) {
         throw new Error('No original decision context found');
+      }
+
+      // Transition to generation phase to process tool results
+      if (this.stateMachine.getCurrentState(chatId) === DecisionState.PROCESSING) {
+        this.stateMachine.transitionToPhase(chatId, 'generation', {
+          resultCount: results.length,
+          successCount: results.filter(r => r.success).length
+        });
+      }
+
+      // Save state after transition
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
       }
 
       // Create decision with tool results
@@ -369,9 +663,13 @@ export class DecisionEngine implements IDecisionEngine {
       return decision;
 
     } catch (error) {
+      // Check if error is retryable using centralized service
+      const isRetryable = this.errorRecoveryService.isRetryableError(error as Error);
+
       this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
         error: error.message,
-        phase: 'tool_processing'
+        phase: 'tool_processing',
+        retryable: isRetryable
       });
 
       // Save state after transition
@@ -461,7 +759,7 @@ export class DecisionEngine implements IDecisionEngine {
   }
 
   /**
-   * Analyze context and make decision
+   * Analyze context and make decision using phase-based approach
    */
   private async analyzeAndDecide(context: DecisionContext): Promise<Decision> {
     const { analysis, availableTools, conversationState } = context;
@@ -485,10 +783,25 @@ export class DecisionEngine implements IDecisionEngine {
       return this.createClarificationDecision(analysis);
     }
 
-    // Transition to DECISION_POINT state
-    console.log(`[DecisionEngine] TRANSITIONING: ${this.stateMachine.getCurrentState(chatId)} -> DECISION_POINT`);
-    this.stateMachine.transition(chatId, DecisionEvent.ANALYSIS_COMPLETE);
-    console.log(`[DecisionEngine] Successfully transitioned to: ${this.stateMachine.getCurrentState(chatId)}`);
+    // Transition to decision phase
+    console.log(`[DecisionEngine] TRANSITIONING TO DECISION PHASE`);
+    this.stateMachine.transitionToPhase(chatId, 'decision', {
+      intent: analysis.intent,
+      confidence: analysis.confidence
+    });
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'DecisionEngine',
+      phase: 'decision_phase',
+      message: 'Transitioned to decision phase',
+      metadata: {
+        chatId: chatId.toString(),
+        intent: analysis.intent,
+        confidence: analysis.confidence,
+        availableTools: availableToolNames
+      }
+    });
 
     // Save state after transition
     if (this.statePersistence) {
@@ -501,7 +814,7 @@ export class DecisionEngine implements IDecisionEngine {
     try {
       switch (analysis.intent) {
         case 'tool_request':
-          return await this.handleToolRequestIntent(context, analysis, availableToolNames, chatId);
+          return await this.handleToolRequestIntent(analysis, availableToolNames, chatId);
 
         case 'command':
           return await this.handleCommandIntent(analysis, availableToolNames, chatId);
@@ -513,302 +826,241 @@ export class DecisionEngine implements IDecisionEngine {
           return await this.handleConversationIntent(analysis, chatId);
 
         default:
-          // Fallback for unknown intents - transition to direct response
-          console.log(`[DecisionEngine] Unknown intent: ${analysis.intent}, using direct response`);
-          this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
-
-          // Save state after transition
-          if (this.statePersistence) {
-            await this.saveCurrentState(chatId);
-          }
-
+          // Direct response for unknown intents
           return this.createDirectResponseDecision(analysis, 'casual');
       }
     } catch (error) {
-      console.error(`[DecisionEngine] Error in intent handling:`, error);
-      this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
-        error: error.message,
-        intent: analysis.intent
-      });
-
-      // Save state after transition
-      if (this.statePersistence) {
-        await this.saveCurrentState(chatId);
-      }
-
+      console.error('[DecisionEngine] Error in analyzeAndDecide:', error);
       throw error;
     }
   }
 
   /**
-   * Handle tool_request intent
+   * Handle tool request intent with phase tracking
    */
   private async handleToolRequestIntent(
-    context: DecisionContext,
     analysis: MessageAnalysis,
     availableTools: string[],
     chatId: number
   ): Promise<Decision> {
-    // Check if suggested tools are available
-    const matchingTools = this.findMatchingTools(analysis.suggestedTools || [], availableTools);
+    const suggestedTools = analysis.suggestedTools || [];
+    const matchingTools = this.findMatchingTools(suggestedTools, availableTools);
 
     if (matchingTools.length > 0) {
-      this.stateMachine.transition(chatId, DecisionEvent.TOOLS_REQUIRED, {
-        toolCount: matchingTools.length
+      // Transition to tool_execution phase
+      this.stateMachine.transitionToPhase(chatId, 'tool_execution', {
+        toolCount: matchingTools.length,
+        tools: matchingTools
       });
 
-      // Save state after transition
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'DecisionEngine',
+        phase: 'tool_execution_phase',
+        message: 'Transitioned to tool execution phase',
+        metadata: {
+          chatId: chatId.toString(),
+          toolCount: matchingTools.length,
+          tools: matchingTools,
+          intent: analysis.intent
+        }
+      });
+
       if (this.statePersistence) {
         await this.saveCurrentState(chatId);
       }
-
-      // Emit decision made event for tool execution
-      await this.eventEmitter.emit({
-        type: SystemEventType.DECISION_MADE,
-        payload: {
-          message: context.message,
-          decision: {
-            action: 'execute_tools',
-            toolCalls: matchingTools.map(toolId => ({
-              toolId,
-              serverId: 'default',
-              arguments: {}
-            })),
-            metadata: {}
-          } as Decision,
-          requestId: context.message.messageId.toString()
-        }
-      });
 
       return {
         action: 'execute_tools',
         toolCalls: matchingTools.map(toolId => ({
           toolId,
-          serverId: 'default', // Will be determined by MCP integration
-          arguments: {} // Will be populated by tool executor
+          serverId: 'default',
+          name: toolId,
+          arguments: {}
         })),
         responseStrategy: {
           type: 'tool_based',
           tone: 'technical',
-          includeKeyboard: true
+          includeKeyboard: false
         },
         metadata: {
           intent: analysis.intent,
           confidence: analysis.confidence,
-          suggestedTools: matchingTools
+          suggestedTools,
+          matchingTools
         }
       };
-    }
+    } else {
+      // No matching tools, transition to generation phase for direct response
+      this.stateMachine.transitionToPhase(chatId, 'generation', {
+        noMatchingTools: true
+      });
 
-    // No matching tools found - respond with available options
-    this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+      this.telemetry?.logStructured({
+        level: LogLevel.WARN,
+        component: 'DecisionEngine',
+        phase: 'no_matching_tools',
+        message: 'No matching tools found for request',
+        metadata: {
+          chatId: chatId.toString(),
+          suggestedTools,
+          availableTools,
+          intent: analysis.intent
+        }
+      });
 
-    // Save state after transition
-    if (this.statePersistence) {
-      await this.saveCurrentState(chatId);
-    }
-
-    return {
-      action: 'respond',
-      responseStrategy: {
-        type: 'direct',
-        tone: 'formal',
-        includeKeyboard: true
-      },
-      metadata: {
-        intent: analysis.intent,
-        confidence: analysis.confidence,
-        message: 'No matching tools found for your request',
-        availableTools
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
       }
-    };
+
+      return this.createDirectResponseDecision(analysis, 'technical');
+    }
   }
 
   /**
-   * Handle command intent
+   * Handle command intent with phase tracking
    */
   private async handleCommandIntent(
     analysis: MessageAnalysis,
     availableTools: string[],
     chatId: number
   ): Promise<Decision> {
-    // Commands might require tools
-    if (analysis.suggestedTools && analysis.suggestedTools.length > 0) {
-      const matchingTools = this.findMatchingTools(analysis.suggestedTools, availableTools);
+    const suggestedTools = analysis.suggestedTools || [];
+    const matchingTools = this.findMatchingTools(suggestedTools, availableTools);
 
-      if (matchingTools.length > 0) {
-        this.stateMachine.transition(chatId, DecisionEvent.TOOLS_REQUIRED, {
-          toolCount: matchingTools.length
-        });
+    if (matchingTools.length > 0) {
+      // Transition to tool_execution phase
+      this.stateMachine.transitionToPhase(chatId, 'tool_execution', {
+        commandType: 'tool_command',
+        toolCount: matchingTools.length
+      });
 
-        // Save state after transition
-        if (this.statePersistence) {
-          await this.saveCurrentState(chatId);
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
+
+      return {
+        action: 'execute_tools',
+        toolCalls: matchingTools.map(toolId => ({
+          toolId,
+          serverId: 'default',
+          name: toolId,
+          arguments: {}
+        })),
+        responseStrategy: {
+          type: 'tool_based',
+          tone: 'formal',
+          includeKeyboard: true
+        },
+        metadata: {
+          intent: analysis.intent,
+          confidence: analysis.confidence,
+          commandType: 'tool_execution'
         }
+      };
+    } else {
+      // Direct command response, transition to generation phase
+      this.stateMachine.transitionToPhase(chatId, 'generation', {
+        commandType: 'direct_command'
+      });
 
-        return {
-          action: 'execute_tools',
-          toolCalls: matchingTools.map(toolId => ({
-            toolId,
-            serverId: 'default',
-            arguments: {}
-          })),
-          responseStrategy: {
-            type: 'tool_based',
-            tone: 'technical',
-            includeKeyboard: false
-          },
-          metadata: {
-            intent: analysis.intent,
-            confidence: analysis.confidence
-          }
-        };
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
       }
+
+      return this.createDirectResponseDecision(analysis, 'formal');
     }
-
-    // Direct command execution without tools
-    this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
-
-    // Save state after transition
-    if (this.statePersistence) {
-      await this.saveCurrentState(chatId);
-    }
-
-    return {
-      action: 'respond',
-      responseStrategy: {
-        type: 'direct',
-        tone: 'technical',
-        includeKeyboard: true
-      },
-      metadata: {
-        intent: analysis.intent,
-        confidence: analysis.confidence,
-        command: analysis.entities?.command || 'unknown'
-      }
-    };
   }
 
   /**
-   * Handle question intent
+   * Handle question intent with phase tracking
    */
   private async handleQuestionIntent(
     analysis: MessageAnalysis,
     availableTools: string[],
     chatId: number
   ): Promise<Decision> {
-    // Check if question requires tools (e.g., data lookup, calculations)
-    if (analysis.suggestedTools && analysis.suggestedTools.length > 0) {
-      const relevance = this.calculateToolRelevance(analysis);
+    const suggestedTools = analysis.suggestedTools || [];
+    const matchingTools = this.findMatchingTools(suggestedTools, availableTools);
+    const toolRelevance = this.calculateToolRelevance(analysis);
 
-      if (relevance > 0.7) { // High tool relevance threshold
-        const matchingTools = this.findMatchingTools(analysis.suggestedTools, availableTools);
+    if (matchingTools.length > 0 && toolRelevance > 0.5) {
+      // Transition to tool_execution phase
+      this.stateMachine.transitionToPhase(chatId, 'tool_execution', {
+        questionType: 'tool_assisted',
+        toolRelevance,
+        toolCount: matchingTools.length
+      });
 
-        if (matchingTools.length > 0) {
-          this.stateMachine.transition(chatId, DecisionEvent.TOOLS_REQUIRED, {
-            toolCount: matchingTools.length,
-            relevance
-          });
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
+      }
 
-          // Save state after transition
-          if (this.statePersistence) {
-            await this.saveCurrentState(chatId);
-          }
-
-          return {
-            action: 'execute_tools',
-            toolCalls: matchingTools.map(toolId => ({
-              toolId,
-              serverId: 'default',
-              arguments: {}
-            })),
-            responseStrategy: {
-              type: 'tool_based',
-              tone: 'formal',
-              includeKeyboard: false
-            },
-            metadata: {
-              intent: analysis.intent,
-              confidence: analysis.confidence,
-              toolRelevance: relevance
-            }
-          };
+      return {
+        action: 'execute_tools',
+        toolCalls: matchingTools.map(toolId => ({
+          toolId,
+          serverId: 'default',
+          name: toolId,
+          arguments: {}
+        })),
+        responseStrategy: {
+          type: 'tool_based',
+          tone: this.determineTone(analysis),
+          includeKeyboard: false
+        },
+        metadata: {
+          intent: analysis.intent,
+          confidence: analysis.confidence,
+          toolRelevance,
+          questionType: 'research'
         }
+      };
+    } else {
+      // Direct answer, transition to generation phase
+      this.stateMachine.transitionToPhase(chatId, 'generation', {
+        questionType: 'direct_answer'
+      });
+
+      if (this.statePersistence) {
+        await this.saveCurrentState(chatId);
       }
+
+      return this.createDirectResponseDecision(analysis, this.determineTone(analysis));
     }
-
-    // Answer question directly
-    this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
-
-    // Save state after transition
-    if (this.statePersistence) {
-      await this.saveCurrentState(chatId);
-    }
-
-    return {
-      action: 'respond',
-      responseStrategy: {
-        type: 'direct',
-        tone: analysis.requiresContext ? 'formal' : 'casual',
-        includeKeyboard: false
-      },
-      metadata: {
-        intent: analysis.intent,
-        confidence: analysis.confidence,
-        requiresContext: analysis.requiresContext
-      }
-    };
   }
 
   /**
-   * Handle conversation intent
+   * Handle conversation intent with phase tracking
    */
-  private async handleConversationIntent(
-    analysis: MessageAnalysis,
-    chatId: number
-  ): Promise<Decision> {
-    this.stateMachine.transition(chatId, DecisionEvent.DIRECT_RESPONSE);
+  private async handleConversationIntent(analysis: MessageAnalysis, chatId: number): Promise<Decision> {
+    // Transition to generation phase for conversational response
+    this.stateMachine.transitionToPhase(chatId, 'generation', {
+      conversationType: 'casual_chat'
+    });
 
-    // Save state after transition
     if (this.statePersistence) {
       await this.saveCurrentState(chatId);
     }
 
-    return {
-      action: 'respond',
-      responseStrategy: {
-        type: 'direct',
-        tone: 'casual',
-        includeKeyboard: false
-      },
-      metadata: {
-        intent: analysis.intent,
-        confidence: analysis.confidence,
-        contextual: analysis.requiresContext
-      }
-    };
+    return this.createDirectResponseDecision(analysis, 'casual');
   }
 
   /**
-   * Create clarification decision for low confidence
+   * Create clarification decision
    */
   private createClarificationDecision(analysis: MessageAnalysis): Decision {
     return {
       action: 'ask_clarification',
       responseStrategy: {
         type: 'clarification',
-        tone: 'formal',
+        tone: 'casual',
         includeKeyboard: true
       },
       metadata: {
-        originalIntent: analysis.intent,
+        intent: analysis.intent,
         confidence: analysis.confidence,
-        reason: 'low_confidence',
-        suggestedQuestions: [
-          'Could you please rephrase your request?',
-          'What would you like me to help you with?',
-          'Can you provide more details?'
-        ]
+        reason: 'low_confidence'
       }
     };
   }
@@ -825,7 +1077,7 @@ export class DecisionEngine implements IDecisionEngine {
       responseStrategy: {
         type: 'direct',
         tone,
-        includeKeyboard: this.shouldIncludeKeyboard(analysis)
+        includeKeyboard: false
       },
       metadata: {
         intent: analysis.intent,
@@ -834,78 +1086,41 @@ export class DecisionEngine implements IDecisionEngine {
     };
   }
 
-  /**
-   * Find matching tools between suggested and available
-   */
   private findMatchingTools(suggested: string[], available: string[]): string[] {
-    if (!suggested || suggested.length === 0) return [];
-
     return suggested.filter(tool => available.includes(tool));
   }
 
-  /**
-   * Calculate tool relevance based on analysis
-   */
   private calculateToolRelevance(analysis: MessageAnalysis): number {
-    // Base relevance on confidence and number of suggested tools
-    let relevance = analysis.confidence;
-
-    if (analysis.suggestedTools && analysis.suggestedTools.length > 0) {
-      // Increase relevance based on number of suggested tools
-      relevance *= (1 + (analysis.suggestedTools.length * 0.1));
-    }
-
-    // Cap at 1.0
-    return Math.min(relevance, 1.0);
+    // Simple heuristic: tool relevance based on keywords and confidence
+    const toolKeywords = ['search', 'find', 'get', 'fetch', 'calculate', 'analyze'];
+    const messageWords = analysis.intent.toLowerCase().split(' ');
+    const matches = messageWords.filter(word => toolKeywords.includes(word));
+    return Math.min(matches.length / messageWords.length + analysis.confidence * 0.3, 1.0);
   }
 
-  /**
-   * Determine appropriate tone based on analysis
-   */
   private determineTone(analysis: MessageAnalysis): 'formal' | 'casual' | 'technical' {
-    if (analysis.intent === 'command' || analysis.suggestedTools?.length) {
-      return 'technical';
-    }
-    if (analysis.intent === 'question') {
-      return 'formal';
+    if (analysis.intent.includes('question') || analysis.intent.includes('help')) {
+      return analysis.confidence > 0.8 ? 'technical' : 'formal';
     }
     return 'casual';
   }
 
-  /**
-   * Determine if inline keyboard should be included
-   */
-  private shouldIncludeKeyboard(analysis: MessageAnalysis): boolean {
-    return analysis.intent === 'command' || (analysis.suggestedTools?.length ?? 0) > 0;
-  }
-
-  /**
-   * Update average decision time
-   */
+  // Metrics methods
   private updateAverageDecisionTime(duration: number): void {
-    const total = this.metrics.averageDecisionTime * (this.metrics.totalDecisions - 1);
-    this.metrics.averageDecisionTime = (total + duration) / this.metrics.totalDecisions;
+    const totalTime = this.metrics.averageDecisionTime * (this.metrics.totalDecisions - 1) + duration;
+    this.metrics.averageDecisionTime = totalTime / this.metrics.totalDecisions;
   }
 
-  /**
-   * Calculate tool usage rate
-   */
   private calculateToolUsageRate(): number {
-    // Simplified calculation - in real implementation, track tool usage over time
-    return Math.min(this.metrics.toolUsageRate + 0.1, 1.0);
+    // Implementation depends on tracking tool usage vs direct responses
+    return 0.7; // Placeholder
   }
 
-  /**
-   * Calculate error rate
-   */
   private calculateErrorRate(): number {
-    // Simplified calculation - in real implementation, track errors over time
-    return Math.min(this.metrics.errorRate + 0.05, 1.0);
+    // Implementation depends on tracking errors vs successful decisions
+    return 0.05; // Placeholder
   }
 
-  /**
-   * Reset metrics
-   */
   private resetMetrics(): void {
     this.metrics = {
       totalDecisions: 0,

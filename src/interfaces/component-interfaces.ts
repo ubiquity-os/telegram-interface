@@ -248,18 +248,12 @@ export interface IResponseGenerator extends IComponent {
 }
 
 /**
- * Decision Engine types
+ * Decision Engine types - Simplified State Machine
  */
 export enum DecisionState {
-  IDLE = 'idle',
-  MESSAGE_RECEIVED = 'message_received',
-  PREPROCESSING = 'preprocessing',
-  DECISION_POINT = 'decision_point',
-  TOOL_REQUIRED = 'tool_required',
-  DIRECT_RESPONSE = 'direct_response',
-  RESPONSE_GENERATION = 'response_generation',
-  VALIDATION = 'validation',
-  SEND_RESPONSE = 'send_response',
+  READY = 'ready',
+  PROCESSING = 'processing',
+  COMPLETED = 'completed',
   ERROR = 'error'
 }
 
