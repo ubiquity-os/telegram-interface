@@ -57,7 +57,7 @@ import {
 const DEFAULT_CONFIG: ResponseGeneratorConfig = {
   defaultModel: 'deepseek/deepseek-r1:free',
   temperature: 0.7,
-  maxTokens: 1000,
+  // Don't artificially limit free models - let them use their natural token limits
   maxResponseLength: 4096,
   enableMarkdown: true,
   responseTemplates: DEFAULT_TEMPLATES,
@@ -427,15 +427,31 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
 
     console.log(`[ResponseGenerator] RETURNED from buildConversationContext() with ${messages.length} messages`);
 
+    // DIAGNOSTIC: Check if current message is already in the conversation history
+    const currentMessageInHistory = context.conversationHistory.some(msg =>
+      msg.content === context.originalMessage && msg.metadata.source === 'telegram'
+    );
+    console.log(`[ResponseGenerator] DIAGNOSTIC: Current message "${context.originalMessage}" already in conversation history: ${currentMessageInHistory}`);
+
+    // DIAGNOSTIC: Check if buildConversationContext already added current message
+    const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
+    const currentMessageAlreadyAdded = lastUserMessage?.content === context.originalMessage;
+    console.log(`[ResponseGenerator] DIAGNOSTIC: Current message already added by buildConversationContext: ${currentMessageAlreadyAdded}`);
+
     console.log(`[ResponseGenerator] Current message to add: "${context.originalMessage}"`);
 
-    // Add the current message
-    messages.push({
-      role: 'user',
-      content: context.originalMessage
-    });
+    // Only add the current message if it's not already present
+    if (!currentMessageAlreadyAdded) {
+      messages.push({
+        role: 'user',
+        content: context.originalMessage
+      });
+      console.log(`[ResponseGenerator] Added current message (was not already present)`);
+    } else {
+      console.log(`[ResponseGenerator] Skipped adding current message (already present from conversation history)`);
+    }
 
-    console.log(`[ResponseGenerator] After adding current message: ${messages.length} messages total`);
+    console.log(`[ResponseGenerator] After processing current message: ${messages.length} messages total`);
 
     console.log(`[ResponseGenerator] Built messages for LLM:`, JSON.stringify(messages, null, 2));
 

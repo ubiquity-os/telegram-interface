@@ -76,7 +76,7 @@ export class OpenRouterLlmService {
     this.config = {
       models: config.models || this.defaultModels,
       temperature: 0.7,
-      maxTokens: 2000,
+      // Don't artificially limit free models - let them use their natural token limits
       ...config
     };
 
@@ -174,7 +174,7 @@ export class OpenRouterLlmService {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://github.com/ubiquity-os/telegram-interface',
-          'X-Title': 'Telegram Interface Bot'
+          'X-Title': 'UbiquityAI'
         },
         body: JSON.stringify(requestBody)
       });
@@ -224,7 +224,7 @@ export class OpenRouterLlmService {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://github.com/ubiquity-os/telegram-interface',
-          'X-Title': 'Telegram Interface Bot'
+          'X-Title': 'UbiquityAI'
         },
         body: JSON.stringify(requestBody)
       });

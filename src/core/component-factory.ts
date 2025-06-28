@@ -56,8 +56,8 @@ export async function createLLMService(): Promise<LlmService> {
       'microsoft/mai-ds-r1:free',
       'deepseek/deepseek-r1:free',
     ],
-    temperature: 0.7,
-    maxTokens: 2000
+    temperature: 0.7
+    // Don't artificially limit free models - let them use their natural token limits
   };
 
   return new LlmService(llmConfig);
@@ -220,7 +220,7 @@ export async function createResponseGenerator(llmService: LlmService): Promise<R
   const config: Partial<ResponseGeneratorConfig> = {
     defaultModel: 'deepseek/deepseek-r1:free',
     temperature: 0.7,
-    maxTokens: 1000,
+    // Don't artificially limit free models - let them use their natural token limits
     maxResponseLength: 4096,
     enableMarkdown: true,
     maxButtonsPerRow: 3,

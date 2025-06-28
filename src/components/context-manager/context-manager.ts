@@ -214,7 +214,7 @@ export class ContextManager implements IContextManager {
           language: 'en',
           timezone: 'UTC',
           model: 'default',
-          maxTokens: 4000,
+          // Don't artificially limit free models - let them use their natural token limits
           temperature: 0.7
         };
       }

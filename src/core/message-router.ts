@@ -18,8 +18,8 @@ import { UMPFormatter } from './protocol/ump-formatter.ts';
 import { SystemOrchestrator } from '../components/system-orchestrator/system-orchestrator.ts';
 import { TelegramUpdate, ToolDefinition } from '../interfaces/component-interfaces.ts';
 
-// Import logging system for log rotation
-import { rotateLog } from '../utils/log-manager.ts';
+// Import event-based logging system
+import { initializeEventLogging, finalizeEventLogging } from '../utils/event-log-manager.ts';
 
 /**
  * Message Router Configuration
@@ -70,14 +70,20 @@ export class MessageRouter {
   ): Promise<UniversalResponse> {
     const startTime = Date.now();
 
-    // Rotate log for new message session with session ID
+    // Initialize event-based logging for this specific message
     try {
-      const rotatedFile = await rotateLog(session.id);
-      if (rotatedFile) {
-        this.log('info', `Rotated previous session log to: ${rotatedFile}`);
-      }
+      const messageTimestamp = Math.floor(Date.now() / 1000);
+      const { sessionId, eventTimestamp } = initializeEventLogging(
+        universalMessage.platform.toLowerCase(),
+        universalMessage.conversation.chatId,
+        universalMessage.userId,
+        messageTimestamp
+      );
+
+      this.log('info', `Processing message event: ${eventTimestamp}-${sessionId.split('_').pop()}.log (session: ${sessionId})`);
     } catch (error) {
-      this.log('warn', `Failed to rotate log: ${error.message}`);
+      this.log('error', `Failed to initialize event logging: ${error.message}`);
+      throw error; // Fail explicitly instead of continuing
     }
 
     try {
@@ -108,6 +114,18 @@ export class MessageRouter {
       this.recordSuccess(universalMessage.platform);
       this.log('info', `Successfully processed message ${universalMessage.id} in ${Date.now() - startTime}ms`);
 
+      await finalizeEventLogging(
+        'message_processed_success',
+        {
+          messageId: universalMessage.id,
+          platform: universalMessage.platform,
+          processingTime: Date.now() - startTime,
+          response: result
+        },
+        universalMessage.platform.toLowerCase(),
+        universalMessage.conversation.chatId,
+        universalMessage.userId
+      );
       return response;
 
     } catch (error) {
@@ -115,6 +133,22 @@ export class MessageRouter {
       this.log('error', `Failed to route message ${universalMessage.id}: ${error.message}`);
 
       // Create error response
+      await finalizeEventLogging(
+        'message_processed_error',
+        {
+          messageId: universalMessage.id,
+          platform: universalMessage.platform,
+          processingTime: Date.now() - startTime,
+          error: {
+            message: error.message,
+            name: error.name,
+            stack: error.stack
+          }
+        },
+        universalMessage.platform.toLowerCase(),
+        universalMessage.conversation.chatId,
+        universalMessage.userId
+      );
       return this.createErrorResponse(universalMessage, error as Error, startTime);
     }
   }

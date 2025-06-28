@@ -91,8 +91,7 @@ import {
   QueueEvent
 } from '../../services/message-queue/index.ts';
 
-// Import logging system for log rotation
-import { rotateLog } from '../../utils/log-manager.ts';
+// Import session-based logging system (removed finalizeEventLogging - handled by MessageRouter)
 
 @injectable()
 export class SystemOrchestrator implements ISystemOrchestrator {
@@ -346,16 +345,6 @@ export class SystemOrchestrator implements ISystemOrchestrator {
    * Process an update (either directly or from the queue)
    */
   private async processUpdate(update: TelegramUpdate, requestId: string): Promise<string> {
-    // Rotate log for new message session
-    try {
-      const rotatedFile = await rotateLog();
-      if (rotatedFile) {
-        console.log(`[SystemOrchestrator] Rotated previous session log to: ${rotatedFile}`);
-      }
-    } catch (error) {
-      console.warn(`[SystemOrchestrator] Failed to rotate log: ${error.message}`);
-    }
-
     console.log(`=== ORCHESTRATOR CALLED ===`);
     console.log(`[SystemOrchestrator] Processing update ${requestId}`);
     console.log(`[SystemOrchestrator] Update content:`, JSON.stringify(update, null, 2));

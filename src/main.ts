@@ -3,8 +3,8 @@ import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
 import { eventBus, SystemEventType } from "./services/event-bus/index.ts";
 
-// Import logging system
-import { initializeLogging } from "./utils/log-manager.ts";
+// Import event-based logging system
+import { initializeLogging } from "./utils/event-log-manager.ts";
 
 // Import DI container and bootstrap function
 import { bootstrap } from "./core/di-container.ts";

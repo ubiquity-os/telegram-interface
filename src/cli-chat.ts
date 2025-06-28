@@ -115,7 +115,7 @@ class CLIChat {
   }
 
   async startChat(): Promise<void> {
-    console.log('🤖 Telegram Interface Bot - CLI Chat');
+    console.log('🤖 UbiquityAI - CLI Chat');
     console.log('=====================================');
 
     // Check if server is running

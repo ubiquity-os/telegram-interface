@@ -10,8 +10,8 @@ import { MessageRouter, createDefaultMessageRouterConfig } from './message-route
 import { SessionManager, createDefaultSessionManagerConfig } from './session-manager.ts';
 import { createSystemOrchestrator } from './component-factory.ts';
 
-// Import logging system
-import { initializeLogging } from '../utils/log-manager.ts';
+// Import event-based logging system
+import { initializeLogging } from '../utils/event-log-manager.ts';
 
 // Load .env file at startup
 await load({ export: true });

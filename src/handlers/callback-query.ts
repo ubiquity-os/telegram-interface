@@ -110,7 +110,7 @@ async function generateHelpContent(): Promise<string> {
     const isHealthy = healthStatus.overall === 'healthy';
 
     const helpContent = `
-🤖 **Telegram Interface Bot Help**
+🤖 **UbiquityAI Help**
 
 **System Status:** ${isHealthy ? '✅ Online' : '⚠️ Limited functionality'}
 
