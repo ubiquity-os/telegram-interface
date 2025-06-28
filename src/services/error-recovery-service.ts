@@ -7,6 +7,7 @@ import { CircuitBreaker } from '../reliability/circuit-breaker.ts';
 import { getCircuitBreakerConfig } from '../reliability/circuit-breaker-configs.ts';
 import { createEventEmitter } from './event-bus/index.ts';
 import type { SystemEvent, EventType } from '../interfaces/message-types.ts';
+import { TelemetryService, LogLevel } from './telemetry/index.ts';
 
 /**
  * Error categories for retry behavior classification
@@ -85,9 +86,27 @@ const DEFAULT_RETRY_CONFIG: Record<ErrorCategory, RetryOptions> = {
 export class ErrorRecoveryService {
   private circuitBreakers = new Map<string, CircuitBreaker<any>>();
   private eventEmitter = createEventEmitter();
+  private telemetry?: TelemetryService;
 
   constructor() {
     console.log('[ErrorRecoveryService] Initialized');
+  }
+
+  /**
+   * Set telemetry service for observability
+   */
+  setTelemetry(telemetry: TelemetryService): void {
+    this.telemetry = telemetry;
+
+    this.telemetry.logStructured({
+      level: LogLevel.INFO,
+      component: 'ErrorRecoveryService',
+      phase: 'telemetry_configured',
+      message: 'Telemetry service configured for ErrorRecoveryService',
+      metadata: {
+        circuitBreakerCount: this.circuitBreakers.size
+      }
+    });
   }
 
   /**
@@ -96,6 +115,8 @@ export class ErrorRecoveryService {
   categorizeError(error: Error): ErrorCategory {
     const message = error.message.toLowerCase();
     const stack = error.stack?.toLowerCase() || '';
+
+    let category: ErrorCategory;
 
     // Network-related errors
     if (
@@ -106,21 +127,19 @@ export class ErrorRecoveryService {
       message.includes('fetch failed') ||
       stack.includes('fetch')
     ) {
-      return ErrorCategory.NETWORK_ERROR;
+      category = ErrorCategory.NETWORK_ERROR;
     }
-
     // Rate limiting errors
-    if (
+    else if (
       message.includes('rate limit') ||
       message.includes('too many requests') ||
       message.includes('429') ||
       message.includes('quota')
     ) {
-      return ErrorCategory.RATE_LIMIT;
+      category = ErrorCategory.RATE_LIMIT;
     }
-
     // Invalid request errors (non-retryable)
-    if (
+    else if (
       message.includes('400') ||
       message.includes('bad request') ||
       message.includes('invalid') ||
@@ -133,11 +152,10 @@ export class ErrorRecoveryService {
       message.includes('404') ||
       message.includes('not found')
     ) {
-      return ErrorCategory.INVALID_REQUEST;
+      category = ErrorCategory.INVALID_REQUEST;
     }
-
     // Service errors (5xx, internal errors)
-    if (
+    else if (
       message.includes('500') ||
       message.includes('internal server error') ||
       message.includes('service unavailable') ||
@@ -147,11 +165,29 @@ export class ErrorRecoveryService {
       message.includes('circuit') ||
       message.includes('upstream')
     ) {
-      return ErrorCategory.SERVICE_ERROR;
+      category = ErrorCategory.SERVICE_ERROR;
+    }
+    // Default to unknown for unclassified errors
+    else {
+      category = ErrorCategory.UNKNOWN;
     }
 
-    // Default to unknown for unclassified errors
-    return ErrorCategory.UNKNOWN;
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'ErrorRecoveryService',
+      phase: 'error_categorized',
+      message: 'Error categorized for recovery strategy',
+      metadata: {
+        category,
+        errorMessage: error.message,
+        errorType: error.constructor.name,
+        hasStack: !!error.stack,
+        strategy: DEFAULT_RETRY_CONFIG[category].strategy,
+        maxAttempts: DEFAULT_RETRY_CONFIG[category].maxAttempts
+      }
+    });
+
+    return category;
   }
 
   /**
@@ -160,8 +196,23 @@ export class ErrorRecoveryService {
   shouldRetry(error: Error, attemptCount: number): boolean {
     const category = this.categorizeError(error);
     const config = DEFAULT_RETRY_CONFIG[category];
+    const shouldRetry = attemptCount < config.maxAttempts!;
 
-    return attemptCount < config.maxAttempts!;
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'ErrorRecoveryService',
+      phase: 'retry_decision',
+      message: 'Determining if error should be retried',
+      metadata: {
+        category,
+        attemptCount,
+        maxAttempts: config.maxAttempts,
+        shouldRetry,
+        errorMessage: error.message
+      }
+    });
+
+    return shouldRetry;
   }
 
   /**
@@ -171,32 +222,55 @@ export class ErrorRecoveryService {
     const category = this.categorizeError(error);
     const config = DEFAULT_RETRY_CONFIG[category];
 
+    let delay: number;
+
     switch (config.strategy) {
       case RetryStrategy.IMMEDIATE:
-        return 0;
+        delay = 0;
+        break;
 
       case RetryStrategy.LINEAR_BACKOFF:
-        return Math.min(
+        delay = Math.min(
           config.initialDelay! * attemptCount,
           config.maxDelay!
         );
+        break;
 
       case RetryStrategy.EXPONENTIAL_BACKOFF:
-        return Math.min(
+        delay = Math.min(
           config.initialDelay! * Math.pow(2, attemptCount - 1),
           config.maxDelay!
         );
+        break;
 
       case RetryStrategy.CIRCUIT_BREAKER:
         // Use linear backoff for circuit breaker scenarios
-        return Math.min(
+        delay = Math.min(
           config.initialDelay! * attemptCount,
           config.maxDelay!
         );
+        break;
 
       default:
-        return config.initialDelay!;
+        delay = config.initialDelay!;
     }
+
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'ErrorRecoveryService',
+      phase: 'retry_delay_calculated',
+      message: 'Retry delay calculated',
+      metadata: {
+        category,
+        strategy: config.strategy,
+        attemptCount,
+        delay,
+        initialDelay: config.initialDelay,
+        maxDelay: config.maxDelay
+      }
+    });
+
+    return delay;
   }
 
   /**
@@ -206,6 +280,22 @@ export class ErrorRecoveryService {
     operation: () => Promise<T>,
     options: RetryOptions = {}
   ): Promise<T> {
+    const startTime = Date.now();
+    const operationId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'ErrorRecoveryService',
+      phase: 'retry_operation_start',
+      message: 'Starting operation with retry logic',
+      metadata: {
+        operationId,
+        maxAttempts: options.maxAttempts,
+        strategy: options.strategy,
+        circuitBreakerKey: options.circuitBreakerKey
+      }
+    });
+
     const category = ErrorCategory.UNKNOWN; // Will be determined from actual error
     const defaultConfig = DEFAULT_RETRY_CONFIG[category];
 
@@ -226,6 +316,19 @@ export class ErrorRecoveryService {
     while (attemptCount <= config.maxAttempts) {
       attemptCount++;
 
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'ErrorRecoveryService',
+        phase: 'retry_attempt_start',
+        message: 'Starting retry attempt',
+        metadata: {
+          operationId,
+          attemptCount,
+          maxAttempts: config.maxAttempts,
+          strategy: config.strategy
+        }
+      });
+
       try {
         // For circuit breaker strategy, wrap operation in circuit breaker
         if (config.strategy === RetryStrategy.CIRCUIT_BREAKER) {
@@ -234,12 +337,44 @@ export class ErrorRecoveryService {
             config.circuitBreakerKey
           );
 
+          const executionTime = Date.now() - startTime;
+
+          this.telemetry?.logStructured({
+            level: LogLevel.INFO,
+            component: 'ErrorRecoveryService',
+            phase: 'retry_operation_success',
+            message: 'Operation completed successfully with circuit breaker',
+            metadata: {
+              operationId,
+              attemptCount,
+              circuitBreakerKey: config.circuitBreakerKey,
+              executionTime
+            },
+            duration: executionTime
+          });
+
           config.onSuccess(result, attemptCount);
           this.emitSuccessEvent(config.circuitBreakerKey, attemptCount);
           return result;
         } else {
           // Direct execution for other strategies
           const result = await operation();
+          const executionTime = Date.now() - startTime;
+
+          this.telemetry?.logStructured({
+            level: LogLevel.INFO,
+            component: 'ErrorRecoveryService',
+            phase: 'retry_operation_success',
+            message: 'Operation completed successfully',
+            metadata: {
+              operationId,
+              attemptCount,
+              strategy: config.strategy,
+              executionTime
+            },
+            duration: executionTime
+          });
+
           config.onSuccess(result, attemptCount);
           this.emitSuccessEvent('direct', attemptCount);
           return result;
@@ -252,8 +387,43 @@ export class ErrorRecoveryService {
         const actualCategory = this.categorizeError(lastError);
         const shouldRetry = this.shouldRetryWithCategory(lastError, attemptCount, actualCategory);
 
+        this.telemetry?.logStructured({
+          level: LogLevel.WARN,
+          component: 'ErrorRecoveryService',
+          phase: 'retry_attempt_failed',
+          message: 'Retry attempt failed',
+          metadata: {
+            operationId,
+            attemptCount,
+            maxAttempts: config.maxAttempts,
+            category: actualCategory,
+            shouldRetry,
+            errorMessage: lastError.message,
+            errorType: lastError.constructor.name
+          },
+          error: lastError
+        });
+
         if (!shouldRetry || attemptCount > config.maxAttempts) {
           // Final failure
+          const executionTime = Date.now() - startTime;
+
+          this.telemetry?.logStructured({
+            level: LogLevel.ERROR,
+            component: 'ErrorRecoveryService',
+            phase: 'retry_operation_failed',
+            message: 'Operation failed after all retry attempts',
+            metadata: {
+              operationId,
+              finalAttemptCount: attemptCount,
+              maxAttempts: config.maxAttempts,
+              category: actualCategory,
+              executionTime
+            },
+            error: lastError,
+            duration: executionTime
+          });
+
           config.onFailure(lastError, attemptCount);
           this.emitFailureEvent(lastError, attemptCount, actualCategory);
           throw lastError;
@@ -261,6 +431,20 @@ export class ErrorRecoveryService {
 
         // Calculate delay and retry
         const delay = this.getRetryDelayForCategory(lastError, attemptCount, actualCategory);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.INFO,
+          component: 'ErrorRecoveryService',
+          phase: 'retry_delay',
+          message: 'Waiting before retry attempt',
+          metadata: {
+            operationId,
+            attemptCount,
+            category: actualCategory,
+            delay,
+            nextAttempt: attemptCount + 1
+          }
+        });
 
         config.onRetry(lastError, attemptCount, delay);
         this.emitRetryEvent(lastError, attemptCount, delay, actualCategory);
@@ -290,9 +474,66 @@ export class ErrorRecoveryService {
         getCircuitBreakerConfig('http-api') // Default config
       );
       this.circuitBreakers.set(circuitBreakerKey, circuitBreaker);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'ErrorRecoveryService',
+        phase: 'circuit_breaker_created',
+        message: 'New circuit breaker created',
+        metadata: {
+          circuitBreakerKey,
+          totalCircuitBreakers: this.circuitBreakers.size
+        }
+      });
     }
 
-    return circuitBreaker.call(operation);
+    const status = circuitBreaker.getStatus();
+
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'ErrorRecoveryService',
+      phase: 'circuit_breaker_execution',
+      message: 'Executing operation through circuit breaker',
+      metadata: {
+        circuitBreakerKey,
+        state: status.state,
+        failureCount: status.failureCount,
+        successCount: status.successCount,
+        lastFailureTime: status.lastFailureTime
+      }
+    });
+
+    try {
+      const result = await circuitBreaker.call(operation);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'ErrorRecoveryService',
+        phase: 'circuit_breaker_success',
+        message: 'Circuit breaker operation succeeded',
+        metadata: {
+          circuitBreakerKey,
+          newState: circuitBreaker.getStatus().state
+        }
+      });
+
+      return result;
+    } catch (error) {
+      this.telemetry?.logStructured({
+        level: LogLevel.WARN,
+        component: 'ErrorRecoveryService',
+        phase: 'circuit_breaker_failure',
+        message: 'Circuit breaker operation failed',
+        metadata: {
+          circuitBreakerKey,
+          newState: circuitBreaker.getStatus().state,
+          errorMessage: (error as Error).message
+        },
+        error: error as Error
+      });
+
+      throw error;
+    }
   }
 
   /**
@@ -341,7 +582,25 @@ export class ErrorRecoveryService {
    */
   getCircuitBreakerStatus(key: string) {
     const circuitBreaker = this.circuitBreakers.get(key);
-    return circuitBreaker?.getStatus() || null;
+    const status = circuitBreaker?.getStatus() || null;
+
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'ErrorRecoveryService',
+      phase: 'circuit_breaker_status_check',
+      message: 'Circuit breaker status checked',
+      metadata: {
+        circuitBreakerKey: key,
+        exists: !!circuitBreaker,
+        status: status ? {
+          state: status.state,
+          failureCount: status.failureCount,
+          successCount: status.successCount
+        } : null
+      }
+    });
+
+    return status;
   }
 
   /**
@@ -350,8 +609,36 @@ export class ErrorRecoveryService {
   resetCircuitBreaker(key: string): void {
     const circuitBreaker = this.circuitBreakers.get(key);
     if (circuitBreaker) {
+      const oldStatus = circuitBreaker.getStatus();
       circuitBreaker.reset();
+      const newStatus = circuitBreaker.getStatus();
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'ErrorRecoveryService',
+        phase: 'circuit_breaker_reset',
+        message: 'Circuit breaker reset successfully',
+        metadata: {
+          circuitBreakerKey: key,
+          oldState: oldStatus.state,
+          newState: newStatus.state,
+          oldFailureCount: oldStatus.failureCount,
+          newFailureCount: newStatus.failureCount
+        }
+      });
+
       console.log(`[ErrorRecoveryService] Reset circuit breaker: ${key}`);
+    } else {
+      this.telemetry?.logStructured({
+        level: LogLevel.WARN,
+        component: 'ErrorRecoveryService',
+        phase: 'circuit_breaker_reset_failed',
+        message: 'Attempted to reset non-existent circuit breaker',
+        metadata: {
+          circuitBreakerKey: key,
+          availableKeys: Array.from(this.circuitBreakers.keys())
+        }
+      });
     }
   }
 
@@ -363,6 +650,18 @@ export class ErrorRecoveryService {
     for (const [key, breaker] of this.circuitBreakers.entries()) {
       statuses[key] = breaker.getStatus();
     }
+
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'ErrorRecoveryService',
+      phase: 'all_circuit_breakers_status',
+      message: 'Retrieved all circuit breaker statuses',
+      metadata: {
+        circuitBreakerCount: this.circuitBreakers.size,
+        keys: Object.keys(statuses)
+      }
+    });
+
     return statuses;
   }
 
@@ -377,6 +676,18 @@ export class ErrorRecoveryService {
    * Emit success event
    */
   private emitSuccessEvent(operation: string, attempts: number): void {
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'ErrorRecoveryService',
+      phase: 'success_event_emitted',
+      message: 'Success event emitted',
+      metadata: {
+        operation,
+        attempts,
+        eventType: 'error_recovery.success'
+      }
+    });
+
     this.eventEmitter.emit({
       type: 'error_recovery.success' as EventType,
       source: 'ErrorRecoveryService',
@@ -393,6 +704,21 @@ export class ErrorRecoveryService {
    * Emit failure event
    */
   private emitFailureEvent(error: Error, attempts: number, category: ErrorCategory): void {
+    this.telemetry?.logStructured({
+      level: LogLevel.ERROR,
+      component: 'ErrorRecoveryService',
+      phase: 'failure_event_emitted',
+      message: 'Failure event emitted',
+      metadata: {
+        errorMessage: error.message,
+        errorType: error.constructor.name,
+        category,
+        attempts,
+        eventType: 'error_recovery.failure'
+      },
+      error
+    });
+
     this.eventEmitter.emit({
       type: 'error_recovery.failure' as EventType,
       source: 'ErrorRecoveryService',
@@ -410,6 +736,21 @@ export class ErrorRecoveryService {
    * Emit retry event
    */
   private emitRetryEvent(error: Error, attempt: number, delay: number, category: ErrorCategory): void {
+    this.telemetry?.logStructured({
+      level: LogLevel.WARN,
+      component: 'ErrorRecoveryService',
+      phase: 'retry_event_emitted',
+      message: 'Retry event emitted',
+      metadata: {
+        errorMessage: error.message,
+        errorType: error.constructor.name,
+        category,
+        attempt,
+        delay,
+        eventType: 'error_recovery.retry'
+      }
+    });
+
     console.log(`[ErrorRecoveryService] Retry attempt ${attempt} for ${category} error: ${error.message} (delay: ${delay}ms)`);
 
     this.eventEmitter.emit({

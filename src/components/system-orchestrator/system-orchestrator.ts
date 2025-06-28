@@ -1035,10 +1035,404 @@ export class SystemOrchestrator implements ISystemOrchestrator {
           requestId,
           maxModerationAttempts,
           hasToolResults: toolResults.length > 0,
+          selfModerationEnabled: !!this.selfModerationEngine
+        }
+      });
+
+      while (moderationAttempts < maxModerationAttempts && !finalResponse) {
+        moderationAttempts++;
+        this.updateFlowStage(requestId, MessageFlowStage.RESPONSE_GENERATION);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.DEBUG,
+          component: 'SystemOrchestrator',
+          phase: 'response_generation_start',
+          message: 'Starting response generation',
+          metadata: {
+            requestId,
+            attempt: moderationAttempts,
+            hasToolResults: toolResults.length > 0
+          }
+        });
+
+        const responseContext: ResponseContext = {
+          message: telegramMessage,
+          analysis,
+          decision,
+          toolResults,
+          conversationState: conversationContext
+        };
+
+        const generatedResponse = await this.responseGenerator.generateResponse(responseContext);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.INFO,
+          component: 'SystemOrchestrator',
+          phase: 'response_generated',
+          message: 'Response generated',
+          metadata: {
+            requestId,
+            attempt: moderationAttempts,
+            responseLength: generatedResponse.content.length,
+            hasAttachments: !!generatedResponse.attachments?.length
+          }
+        });
+
+        // Stage 8: Self-moderation (if enabled)
+        if (this.selfModerationEngine) {
+          this.updateFlowStage(requestId, MessageFlowStage.MODERATION);
+
+          this.telemetry?.logStructured({
+            level: LogLevel.DEBUG,
+            component: 'SystemOrchestrator',
+            phase: 'moderation_start',
+            message: 'Starting self-moderation',
+            metadata: {
+              requestId,
+              attempt: moderationAttempts,
+              responseLength: generatedResponse.content.length
+            }
+          });
+
+          const moderationResult = await this.selfModerationEngine.moderateResponse(
+            generatedResponse,
+            conversationContext
+          );
+
+          this.telemetry?.logStructured({
+            level: LogLevel.INFO,
+            component: 'SystemOrchestrator',
+            phase: 'moderation_complete',
+            message: 'Self-moderation completed',
+            metadata: {
+              requestId,
+              attempt: moderationAttempts,
+              approved: moderationResult.approved,
+              confidence: moderationResult.confidence,
+              issueCount: moderationResult.issues?.length || 0,
+              hasModifications: !!moderationResult.modifiedResponse
+            }
+          });
+
+          if (moderationResult.approved) {
+            finalResponse = moderationResult.modifiedResponse || generatedResponse;
+          } else {
+            // Log moderation rejection and retry
+            this.telemetry?.logStructured({
+              level: LogLevel.WARN,
+              component: 'SystemOrchestrator',
+              phase: 'moderation_rejected',
+              message: 'Response rejected by moderation, retrying',
+              metadata: {
+                requestId,
+                attempt: moderationAttempts,
+                issues: moderationResult.issues?.map(i => i.type),
+                maxAttempts: maxModerationAttempts
+              }
+            });
+          }
+        } else {
+          // No moderation, accept response
+          finalResponse = generatedResponse;
+        }
+      }
+
+      if (!finalResponse) {
+        throw new Error(`Failed to generate acceptable response after ${maxModerationAttempts} attempts`);
+      }
+
+      // Stage 9: Send response
+      this.updateFlowStage(requestId, MessageFlowStage.SENDING_RESPONSE);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'SystemOrchestrator',
+        phase: 'response_sending',
+        message: 'Sending final response',
+        metadata: {
+          requestId,
+          responseLength: finalResponse.content.length,
+          moderationAttempts,
+          hasAttachments: !!finalResponse.attachments?.length
+        }
+      });
+
+      const telegramResponse: TelegramResponse = {
+        chatId: telegramMessage.chatId,
+        text: finalResponse.content,
+        replyToMessageId: telegramMessage.messageId,
+        attachments: finalResponse.attachments
+      };
+
+      const sentMessage = await this.messageInterface.sendMessage(telegramResponse);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.INFO,
+        component: 'SystemOrchestrator',
+        phase: 'response_sent',
+        message: 'Response sent successfully',
+        metadata: {
+          requestId,
+          messageId: sentMessage.messageId,
+          processingTime: Date.now() - requestContext.startTime.getTime()
+        },
+        duration: Date.now() - requestContext.startTime.getTime()
+      });
+
+      // Emit response generated event
+      await this.eventEmitter.emit<ResponseGeneratedEvent>({
+        type: SystemEventType.RESPONSE_GENERATED,
+        payload: {
+          response: finalResponse,
+          sentMessage,
+          requestId
+        }
+      });
+
+      // Update metrics
+      this.metrics.successfulRequests++;
+      this.metrics.activeRequests--;
+
+      // Clean up flow tracker
+      this.flowTrackers.delete(requestId);
+
+      return sentMessage.messageId;
+
+    } catch (error) {
+      console.error(`[SystemOrchestrator] Error processing update ${requestId}:`, error);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.ERROR,
+        component: 'SystemOrchestrator',
+        phase: 'processing_error',
+        message: 'Error occurred during message processing',
+        metadata: {
+          requestId,
+          errorMessage: error.message,
+          errorType: error.constructor.name,
+          processingTime: Date.now() - requestContext.startTime.getTime()
+        },
+        error: error as Error,
+        duration: Date.now() - requestContext.startTime.getTime()
+      });
+
+      // Update metrics
+      this.metrics.failedRequests++;
+      this.metrics.activeRequests--;
+      this.metrics.errorRate = this.metrics.failedRequests / this.metrics.totalRequests;
+
+      // Clean up flow tracker
+      this.flowTrackers.delete(requestId);
+
+      // Emit error event
+      await this.eventEmitter.emit<ErrorOccurredEvent>({
+        type: SystemEventType.ERROR_OCCURRED,
+        payload: {
+          error: error as Error,
+          context: { requestId, chatId: update.message?.chat?.id },
+          component: 'SystemOrchestrator'
+        }
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Update flow stage tracker
+   */
+  private updateFlowStage(requestId: string, stage: MessageFlowStage): void {
+    const tracker = this.flowTrackers.get(requestId);
+    if (tracker) {
+      tracker.currentStage = stage;
+      tracker.stages.push({
+        stage,
+        timestamp: new Date()
+      });
+
+      this.telemetry?.logStructured({
+        level: LogLevel.DEBUG,
+        component: 'SystemOrchestrator',
+        phase: 'flow_stage_updated',
+        message: 'Message flow stage updated',
+        metadata: {
+          requestId,
+          stage: MessageFlowStage[stage],
+          totalStages: tracker.stages.length,
+          elapsedTime: Date.now() - tracker.startTime.getTime()
+        }
+      });
+    }
+  }
+
+  /**
+   * Subscribe to system events
+   */
+  private async subscribeToEvents(): Promise<void> {
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'event_subscription_start',
+      message: 'Subscribing to system events',
+      metadata: {}
+    });
+
+    // Subscribe to system-wide events
+    eventBus.subscribe(SystemEventType.ERROR_OCCURRED, async (event: ErrorOccurredEvent) => {
+      console.error('[SystemOrchestrator] System error occurred:', event.payload.error);
+
+      this.telemetry?.logStructured({
+        level: LogLevel.ERROR,
+        component: 'SystemOrchestrator',
+        phase: 'system_error_received',
+        message: 'System error event received',
+        metadata: {
+          errorComponent: event.payload.component,
+          errorMessage: event.payload.error.message,
+          context: event.payload.context
+        },
+        error: event.payload.error
+      });
+    });
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'event_subscription_complete',
+      message: 'System event subscriptions configured',
+      metadata: {}
+    });
+  }
+
+  /**
+   * Get system health status
+   */
+  getHealthStatus(): SystemHealthStatus {
+    const componentStatuses: Record<string, ComponentStatus> = {};
+
+    for (const [name, managed] of this.components.entries()) {
+      componentStatuses[name] = {
+        name: managed.name,
+        status: managed.state === ComponentState.READY ? 'operational' : 'error',
+        lastError: undefined, // Could be enhanced to track errors
+        restartCount: managed.restartCount
+      };
+    }
+
+    const healthStatus: SystemHealthStatus = {
+      overall: this.isInitialized ? 'operational' : 'error',
+      components: componentStatuses,
+      uptime: Date.now() - this.startTime.getTime(),
+      metrics: this.metrics
+    };
+
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'SystemOrchestrator',
+      phase: 'health_check',
+      message: 'System health status checked',
+      metadata: {
+        overall: healthStatus.overall,
+        componentCount: Object.keys(componentStatuses).length,
+        uptime: healthStatus.uptime,
+        totalRequests: this.metrics.totalRequests,
+        errorRate: this.metrics.errorRate
+      }
+    });
+
+    return healthStatus;
+  }
+
+  /**
+   * Get system metrics
+   */
+  getMetrics(): SystemMetrics {
+    this.telemetry?.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'SystemOrchestrator',
+      phase: 'metrics_retrieved',
+      message: 'System metrics retrieved',
+      metadata: {
+        totalRequests: this.metrics.totalRequests,
+        successfulRequests: this.metrics.successfulRequests,
+        failedRequests: this.metrics.failedRequests,
+        errorRate: this.metrics.errorRate,
+        activeRequests: this.metrics.activeRequests
+      }
+    });
+
+    return { ...this.metrics };
+  }
+
+  /**
+   * Shutdown the orchestrator and all managed components
+   */
+  async shutdown(): Promise<void> {
+    console.log('[SystemOrchestrator] Shutting down...');
+
+    this.telemetry?.logStructured({
+      level: LogLevel.INFO,
+      component: 'SystemOrchestrator',
+      phase: 'shutdown_start',
+      message: 'Starting SystemOrchestrator shutdown',
+      metadata: {
+        componentCount: this.components.size,
+        activeRequests: this.metrics.activeRequests,
+        uptime: Date.now() - this.startTime.getTime()
+      }
+    });
+
+    // Stop message queue first
+    if (this.messageQueue) {
+      try {
+        await this.messageQueue.stop();
+        console.log('[SystemOrchestrator] Message queue stopped');
+
+        this.telemetry?.logStructured({
+          level: LogLevel.INFO,
+          component: 'SystemOrchestrator',
+          phase: 'message_queue_stopped',
+          message: 'Message queue stopped successfully',
+          metadata: {}
+        });
+      } catch (error) {
+        console.error('[SystemOrchestrator] Error stopping message queue:', error);
+
+        this.telemetry?.logStructured({
+          level: LogLevel.ERROR,
+          component: 'SystemOrchestrator',
+          phase: 'message_queue_stop_error',
+          message: 'Error stopping message queue',
+          metadata: {
+            errorMessage: error.message
+          },
+          error: error as Error
+        });
+      }
+    }
+
+    // Shutdown components in reverse order
+    const sortedComponents = Array.from(this.components.values())
+      .sort((a, b) => b.initOrder - a.initOrder);
+
+    for (const managed of sortedComponents) {
+      if (managed.component && typeof managed.component.shutdown === 'function') {
+        try {
           console.log(`[SystemOrchestrator] Shutting down component: ${managed.name}`);
           managed.state = ComponentState.STOPPING;
           await managed.component.shutdown();
           managed.state = ComponentState.STOPPED;
+
+          this.telemetry?.logStructured({
+            level: LogLevel.INFO,
+            component: 'SystemOrchestrator',
+            phase: 'component_shutdown_success',
+            message: 'Component shutdown successfully',
+            metadata: {
+              componentName: managed.name,
+              initOrder: managed.initOrder
+            }
+          });
 
           // Emit component shutdown event
           await this.eventEmitter.emit<ComponentShutdownEvent>({
@@ -1049,6 +1443,18 @@ export class SystemOrchestrator implements ISystemOrchestrator {
           });
         } catch (error) {
           console.error(`[SystemOrchestrator] Error shutting down ${managed.name}:`, error);
+
+          this.telemetry?.logStructured({
+            level: LogLevel.ERROR,
+            component: 'SystemOrchestrator',
+            phase: 'component_shutdown_error',
+            message: 'Error shutting down component',
+            metadata: {
+              componentName: managed.name,
+              errorMessage: error.message
+            },
+            error: error as Error
+          });
         }
       }
     }
