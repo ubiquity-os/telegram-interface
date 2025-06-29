@@ -4,8 +4,6 @@
  */
 
 // deno-lint-ignore-file no-unused-vars
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { promises as fs } from 'node:fs';
 
 interface FileInfo {
   name: string;
@@ -18,7 +16,32 @@ declare const Deno: {
   env: {
     get(key: string): string | undefined;
   };
-}; // Specific Deno type declaration
+  mkdir(path: string | URL, options?: { recursive?: boolean }): Promise<void>;
+  open(path: string | URL, options?: { read?: boolean; write?: boolean; create?: boolean; append?: boolean }): Promise<Deno.FsFile>;
+  readDir(path: string | URL): AsyncIterable<Deno.DirEntry>;
+  stat(path: string | URL): Promise<Deno.FileInfo>;
+  remove(path: string | URL): Promise<void>;
+  errors: {
+    AlreadyExists: new() => Error;
+  };
+}; // Specific Deno type declarations
+
+declare namespace Deno {
+  interface FsFile {
+    write(p: Uint8Array): Promise<number>;
+    close(): void;
+  }
+
+  interface DirEntry {
+    name: string;
+    isFile: boolean;
+    isDirectory: boolean;
+  }
+
+  interface FileInfo {
+    mtime: Date | null;
+  }
+}
 
 /**
  * Structured log interface for consistent logging format
@@ -86,6 +109,27 @@ export enum LogLevel {
 }
 
 /**
+ * Simple async context implementation for Deno
+ */
+class AsyncLocalStorage<T> {
+  private contextMap = new Map<number, T>();
+  private currentId = 0;
+
+  enterWith(context: T): void {
+    this.currentId++;
+    this.contextMap.set(this.currentId, context);
+  }
+
+  getStore(): T | undefined {
+    return this.contextMap.get(this.currentId);
+  }
+
+  exit(): void {
+    this.contextMap.delete(this.currentId);
+  }
+}
+
+/**
  * OpenTelemetry-based Telemetry Service
  */
 export class TelemetryService {
@@ -93,7 +137,7 @@ export class TelemetryService {
   private config: TelemetryConfig;
   private asyncLocalStorage = new AsyncLocalStorage<TraceContext>();
   private isInitialized = false;
-  private logFileHandle: any = null;
+  private logFileHandle: Deno.FsFile | null = null;
   private currentLogFile: string | null = null;
 
   private constructor(config: TelemetryConfig) {
@@ -491,9 +535,9 @@ export class TelemetryService {
    */
   private async ensureLogDirectory(): Promise<void> {
     try {
-      await fs.mkdir(this.config.fileExporter.directory, { recursive: true });
+      await Deno.mkdir(this.config.fileExporter.directory, { recursive: true });
     } catch (error: any) {
-      if (error.code !== 'EEXIST') {
+      if (!(error instanceof Deno.errors.AlreadyExists)) {
         throw error;
       }
     }
@@ -517,7 +561,7 @@ export class TelemetryService {
       }
 
       // Open new file
-      this.logFileHandle = await fs.open(newLogFile, 'a');
+      this.logFileHandle = await Deno.open(newLogFile, { write: true, create: true, append: true });
 
       this.currentLogFile = newLogFile;
 
@@ -537,7 +581,7 @@ export class TelemetryService {
         const logLine = JSON.stringify(log) + '\n';
         const encoder = new TextEncoder();
         await this.logFileHandle.write(encoder.encode(logLine));
-        await this.logFileHandle.sync();
+        // Note: Removed sync() call as Deno file handles don't have this method
       }
     } catch (error) {
       console.error('[TelemetryService] Failed to write log to file:', error);
@@ -576,13 +620,12 @@ export class TelemetryService {
 
     try {
       const files = [];
-      const dirEntries = await fs.readdir(this.config.fileExporter.directory);
-      for (const fileName of dirEntries) {
-        if (fileName.startsWith('traces-') && fileName.endsWith('.jsonl')) {
-          const filePath = `${this.config.fileExporter.directory}/${fileName}`;
-          const stat = await fs.stat(filePath);
+      for await (const dirEntry of Deno.readDir(this.config.fileExporter.directory)) {
+        if (dirEntry.isFile && dirEntry.name.startsWith('traces-') && dirEntry.name.endsWith('.jsonl')) {
+          const filePath = `${this.config.fileExporter.directory}/${dirEntry.name}`;
+          const stat = await Deno.stat(filePath);
           const fileInfo = {
-            name: fileName,
+            name: dirEntry.name,
             path: filePath,
             mtime: stat.mtime || new Date(0)
           };
@@ -596,7 +639,7 @@ export class TelemetryService {
       // Remove files beyond maxFiles limit
       for (let i = maxFiles; i < files.length; i++) {
         try {
-          await fs.unlink(files[i].path);
+          await Deno.remove(files[i].path);
           console.log(`[TelemetryService] Removed old log file: ${files[i].name}`);
         } catch (error) {
           console.warn(`[TelemetryService] Failed to remove old log file ${files[i].name}:`, error);

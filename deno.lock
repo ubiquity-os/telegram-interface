@@ -184,6 +184,10 @@
     "https://deno.land/x/grammy_types@v3.5.2/update.ts": "a9fe07b677235a0d29e371f7fdc57ebf46b248ce956a2d918ed844a3c0fbe5de"
   },
   "workspace": {
+    "dependencies": [
+      "npm:inversify@^7.5.4",
+      "npm:reflect-metadata@^0.2.2"
+    ],
     "packageJson": {
       "dependencies": [
         "npm:inversify@^7.5.4",

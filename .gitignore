@@ -1,6 +1,7 @@
 .env
 .env.local
 *.log
+logs/
 .DS_Store
 mcp-settings.json
 node_modules

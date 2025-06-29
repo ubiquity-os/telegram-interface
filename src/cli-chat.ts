@@ -8,7 +8,7 @@
  */
 
 import { Platform } from "./core/protocol/ump-types.ts";
-import { ApiGateway, GatewayConfig, GatewayRequest } from "./core/api-gateway.ts";
+import { ApiGateway, ApiGatewayConfig, IncomingRequest } from "./core/api-gateway.ts";
 import { TelemetryService, createDefaultTelemetryConfig, initializeTelemetry } from "./services/telemetry/index.ts";
 
 interface ChatConfig {
@@ -50,32 +50,41 @@ class CLIChat {
     const telemetry = await initializeTelemetry(telemetryConfig);
 
     // Initialize API Gateway with CLI-optimized configuration
-    const gatewayConfig: GatewayConfig = {
+    const gatewayConfig: ApiGatewayConfig = {
       rateLimiting: {
-        enabled: true,
-        windowMs: 60000, // 1 minute
-        maxRequests: {
-          telegram: 30,
-          http: 60,
-          cli: 100 // Higher limit for CLI
+        telegram: {
+          windowMs: 60000,
+          maxRequests: 30,
+          keyGenerator: (req) => `telegram:${req.userId}`,
+          enabled: true
         },
-        cleanupInterval: 300000 // 5 minutes
+        http: {
+          windowMs: 60000,
+          maxRequests: 60,
+          keyGenerator: (req) => `http:${req.userId}`,
+          enabled: true
+        },
+        cli: {
+          windowMs: 60000,
+          maxRequests: 100, // Higher limit for CLI
+          keyGenerator: (req) => `cli:${req.userId}`,
+          enabled: true
+        }
       },
       middleware: {
-        enableLogging: true,
+        enableAuth: false, // Disable auth for CLI
         enableValidation: true,
         enableTransformation: true,
-        enableAuthentication: false, // Disable auth for CLI
-        enableRateLimit: true
+        enableLogging: true
       },
-      security: {
-        maxContentLength: 50000, // Higher limit for CLI
-        allowedCharacterPattern: /^[\s\S]*$/,
-        blockedPatterns: [
-          /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-          /javascript:/gi,
-          /vbscript:/gi
-        ]
+      performance: {
+        requestTimeout: 30000,
+        maxConcurrentRequests: 100
+      },
+      debug: {
+        logRequests: true,
+        logResponses: true,
+        logMiddleware: false
       }
     };
 
@@ -125,21 +134,17 @@ class CLIChat {
 
     try {
       // Process through gateway first
-      const gatewayRequest: GatewayRequest = {
+      const gatewayRequest: IncomingRequest = {
         id: `cli_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         source: 'cli' as const,
-        timestamp: Date.now(),
+        timestamp: new Date(),
         userId: this.config.userId,
         content: message,
         metadata: {
           sessionId: this.sessionId,
           interface: 'cli',
           version: '1.0.0'
-        },
-        originalRequest: new Request('http://localhost/cli', {
-          method: 'POST',
-          body: JSON.stringify({ message, userId: this.config.userId, sessionId: this.sessionId })
-        })
+        }
       };
 
       const gatewayResponse = await this.gateway.processRequest(gatewayRequest);
@@ -147,8 +152,7 @@ class CLIChat {
       if (!gatewayResponse.success) {
         return {
           success: false,
-          error: `Gateway rejected request: ${gatewayResponse.error}`,
-          gatewayMetrics: gatewayResponse.metrics
+          error: `Gateway rejected request: ${gatewayResponse.error?.message || 'Unknown error'}`
         };
       }
 
@@ -176,11 +180,11 @@ class CLIChat {
 
       const data = await response.json();
 
-      // Include gateway metrics in response
+      // Include gateway metadata in response
       return {
         ...data,
         gatewayProcessed: true,
-        gatewayMetrics: gatewayResponse.metrics
+        gatewayMetadata: gatewayResponse.metadata
       };
     } catch (error) {
       return {
@@ -272,16 +276,10 @@ class CLIChat {
     }
   }
 
-  private async readInput(prompt: string): Promise<string> {
-    // Write prompt to stdout
-    await Deno.stdout.write(new TextEncoder().encode(prompt));
-
-    // Read from stdin
-    const buffer = new Uint8Array(1024);
-    const n = await Deno.stdin.read(buffer) ?? 0;
-
-    // Convert to string and trim newline
-    return new TextDecoder().decode(buffer.subarray(0, n)).replace(/\r?\n$/, '');
+  private async readInput(promptText: string): Promise<string> {
+    // Use Deno's built-in prompt function for reliable CLI input
+    const input = prompt(promptText);
+    return input || '';
   }
 
   private showHelp(): void {
@@ -295,9 +293,9 @@ class CLIChat {
 
 // Configuration
 function getConfig(): ChatConfig {
-  const apiUrl = process.env('API_URL') || 'http://localhost:8001';
-  const apiKey = process.env('API_KEY') || 'default-api-key';
-  const userId = process.env('USER_ID') || `cli-user-${Date.now()}`;
+  const apiUrl = Deno.env.get('API_URL') || 'http://localhost:8001';
+  const apiKey = Deno.env.get('API_KEY') || 'default-api-key';
+  const userId = Deno.env.get('USER_ID') || `cli-user-${Date.now()}`;
 
   return {
     apiUrl,

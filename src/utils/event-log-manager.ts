@@ -9,8 +9,6 @@
  * 5. Piece together conversations by grouping files with same sessionId, sorted by timestamp
  */
 
-import { promises as fs } from "node:fs";
-
 import { getOrCreateSessionId } from './session-manager.ts';
 
 const LOGS_DIR = 'logs';
@@ -33,10 +31,10 @@ let currentEventTimestamp: number | null = null;
  */
 async function ensureLogsDirectory(): Promise<void> {
   try {
-    await fs.access(LOGS_DIR);
+    await Deno.stat(LOGS_DIR);
   } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      await fs.mkdir(LOGS_DIR, { recursive: true });
+    if (error instanceof Deno.errors.NotFound) {
+      await Deno.mkdir(LOGS_DIR, { recursive: true });
     } else {
       throw error;
     }
@@ -82,7 +80,7 @@ export async function logEvent(
   };
 
   // Write event to its own file
-  await fs.writeFile(logFilePath, JSON.stringify(logEntry, null, 2));
+  await Deno.writeTextFile(logFilePath, JSON.stringify(logEntry, null, 2));
 
   console.log(`[EventLogger] Logged ${eventType} to: ${filename} (session: ${sessionId})`);
   return logFilePath;
@@ -126,7 +124,7 @@ async function writeToLatestLog(content: string): Promise<void> {
     const logEntry = `[${timestamp}]${sessionInfo}${eventInfo} ${content}\n`;
 
     // Append to latest.log for real-time monitoring
-    await fs.appendFile(LATEST_LOG_FILE, logEntry);
+    await Deno.writeTextFile(LATEST_LOG_FILE, logEntry, { append: true });
   } catch (error) {
     // Silently fail to avoid infinite loops
     originalConsole.error('[EventLogger] Failed to write to latest.log:', error);
