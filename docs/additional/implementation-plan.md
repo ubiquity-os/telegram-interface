@@ -15,8 +15,8 @@
 
 ```bash
 # Create project directory
-mkdir telegram-interface
-cd telegram-interface
+mkdir ubiquity-ai
+cd ubiquity-ai
 
 # Create directory structure
 mkdir -p src/handlers src/middleware src/utils tests
@@ -131,7 +131,7 @@ import { Context, NextFunction } from "grammy";
 
 export async function loggerMiddleware(ctx: Context, next: NextFunction) {
   const startTime = Date.now();
-  
+
   console.log({
     type: "request",
     update_id: ctx.update.update_id,
@@ -175,9 +175,9 @@ Deno.serve({
 
   // Health check endpoint
   if (url.pathname === "/health" && req.method === "GET") {
-    return new Response(JSON.stringify({ 
-      status: "ok", 
-      timestamp: new Date().toISOString() 
+    return new Response(JSON.stringify({
+      status: "ok",
+      timestamp: new Date().toISOString()
     }), {
       headers: { "Content-Type": "application/json" },
     });
@@ -221,11 +221,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Deploy to Deno Deploy
         uses: denoland/deployctl@v1
         with:
-          project: telegram-interface
+          project: ubiquity-ai
           entrypoint: src/main.ts
 ```
 
@@ -287,10 +287,10 @@ Deno.test("Bot creation", () => {
 Deno.test("Config validation", () => {
   // Mock environment
   Deno.env.set("BOT_TOKEN", "test-token");
-  
+
   const { getConfig } = await import("../src/utils/config.ts");
   const config = getConfig();
-  
+
   assertEquals(config.botToken, "test-token");
   assertEquals(config.environment, "development");
 });
@@ -347,12 +347,12 @@ flowchart TD
     GitHub -->|Trigger| Actions[GitHub Actions]
     Actions -->|Deploy| Deno[Deno Deploy]
     Deno -->|Webhook| Telegram[Telegram Servers]
-    
+
     subgraph Local
         Dev
         Test[Run Tests]
     end
-    
+
     subgraph CI/CD
         GitHub
         Actions

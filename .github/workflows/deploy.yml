@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Deno
         uses: denoland/setup-deno@v1
         with:
@@ -21,13 +21,13 @@ jobs:
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             ./verify-token.sh production \
               "${{ secrets.DENO_DEPLOY_TOKEN }}" \
-              "telegram-interface" \
-              "telegram-project-preview"
+              "ubiquity-ai" \
+              "ubiquity-ai-preview"
           else
             ./verify-token.sh preview \
               "${{ secrets.DENO_DEPLOY_TOKEN }}" \
-              "telegram-interface" \
-              "telegram-project-preview"
+              "ubiquity-ai" \
+              "ubiquity-ai-preview"
           fi
 
       - name: Deploy to Deno
@@ -36,13 +36,13 @@ jobs:
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             ./deploy.sh production \
               "${{ secrets.DENO_DEPLOY_TOKEN }}" \
-              "telegram-interface" \
-              "telegram-project-preview"
+              "ubiquity-ai" \
+              "ubiquity-ai-preview"
           else
             ./deploy.sh preview \
               "${{ secrets.DENO_DEPLOY_TOKEN }}" \
-              "telegram-interface" \
-              "telegram-project-preview"
+              "ubiquity-ai" \
+              "ubiquity-ai-preview"
           fi
 
       - name: Update Telegram webhook
@@ -52,10 +52,10 @@ jobs:
             ./update-webhook.sh production \
               "${{ secrets.BOT_TOKEN }}" \
               "${{ secrets.WEBHOOK_SECRET_PRODUCTION }}" \
-              "telegram-interface"
+              "ubiquity-ai"
           else
             ./update-webhook.sh preview \
               "${{ secrets.PREVIEW_BOT_TOKEN }}" \
               "${{ secrets.WEBHOOK_SECRET_PREVIEW }}" \
-              "telegram-project-preview"
+              "ubiquity-ai-preview"
           fi

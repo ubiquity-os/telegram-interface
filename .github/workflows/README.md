@@ -5,7 +5,7 @@ This directory contains the GitHub Actions workflows that orchestrate the dual b
 ## Overview
 
 The CI/CD system supports a dual deployment strategy:
-- **Production Bot**: Deployed to `https://telegram-interface.deno.dev` on main branch pushes
+- **Production Bot**: Deployed to `https://ubiquity-ai.deno.dev` on main branch pushes
 - **Preview Bot**: Deployed to auto-generated preview URLs on feature branch pushes
 
 ## Workflows
@@ -70,7 +70,7 @@ flowchart TD
     A[Push to main] --> B[Deploy to production]
     B --> C[Set BOT_TYPE=production]
     C --> D[Use BOT_TOKEN]
-    D --> E[Deploy to telegram-interface.deno.dev]
+    D --> E[Deploy to ubiquity-ai.deno.dev]
     E --> F[Set production webhook]
     F --> G[Verify deployment]
 ```
@@ -142,7 +142,7 @@ If automated webhook setup fails, you can manually set webhooks:
 # Set production webhook
 bun run scripts/set-webhook.ts --bot-type production
 
-# Set preview webhook  
+# Set preview webhook
 bun run scripts/set-webhook.ts --bot-type preview
 
 # Check webhook status

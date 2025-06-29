@@ -35,13 +35,13 @@ This document outlines the architecture for a minimal Telegram chatbot designed 
 - Active maintenance and community
 
 **Alternative Considered:**
-- `telegram-interface-api`: Lower-level, more control but requires more boilerplate
+- `ubiquity-ai-api`: Lower-level, more control but requires more boilerplate
 - Direct Telegram API calls: Maximum flexibility but significant implementation overhead
 
 ### 3. Project Structure
 
 ```
-telegram-interface/
+ubiquity-ai/
 ├── deno.json              # Deno configuration
 ├── .env.example           # Example environment variables
 ├── .gitignore             # Git ignore file
@@ -71,7 +71,7 @@ flowchart LR
     MW --> H[Message Handler]
     H -->|Response| DD
     DD -->|200 OK| TG
-    
+
     subgraph Deno Deploy
         DD
         MW
@@ -95,14 +95,14 @@ https://{project-name}.deno.dev/webhook/{webhook-secret}
 ```mermaid
 flowchart TD
     ENV[Environment Variables] -->|Runtime| DD[Deno Deploy]
-    
+
     subgraph Security Layers
         S1[Bot Token Protection]
         S2[Webhook Secret]
         S3[Request Validation]
         S4[HTTPS Only]
     end
-    
+
     DD --> S1
     DD --> S2
     DD --> S3
@@ -182,23 +182,23 @@ classDiagram
         +init(): Promise~void~
         +handleUpdate(update: Update): Promise~void~
     }
-    
+
     class MessageHandler {
         +handle(ctx: Context): Promise~void~
     }
-    
+
     class WebhookServer {
         -bot: Bot
         +serve(): Promise~void~
         +validateRequest(req: Request): boolean
     }
-    
+
     class Config {
         +getBotToken(): string
         +getWebhookSecret(): string
         +isDevelopment(): boolean
     }
-    
+
     Bot --> MessageHandler
     WebhookServer --> Bot
     Bot --> Config
@@ -229,12 +229,12 @@ flowchart TD
     Test -->|Validate| Push[Push to GitHub]
     Push -->|Auto Deploy| DD[Deno Deploy]
     DD -->|Webhook| Prod[Production Bot]
-    
+
     subgraph Local Testing
         Local
         Test
     end
-    
+
     subgraph CI/CD
         Push
         DD

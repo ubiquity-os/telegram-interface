@@ -218,7 +218,7 @@ LOG_LEVEL=debug|info|warn|error
 ```bash
 # Clone repository
 git clone <repository-url>
-cd telegram-interface
+cd ubiquity-ai
 
 # Set up environment
 cp .env.example .env

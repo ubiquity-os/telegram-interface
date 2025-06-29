@@ -147,7 +147,7 @@ class OpenRouterRoutingTester {
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/ubiquity-os/telegram-interface',
+        'HTTP-Referer': 'https://github.com/ubiquity-os/ubiquity-ai',
         'X-Title': 'Telegram Interface Bot - OpenRouter Routing Test'
       },
       body: JSON.stringify(requestBody)
@@ -286,7 +286,7 @@ class OpenRouterRoutingTester {
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/ubiquity-os/telegram-interface',
+        'HTTP-Referer': 'https://github.com/ubiquity-os/ubiquity-ai',
         'X-Title': 'Telegram Interface Bot - OpenRouter Routing Test'
       },
       body: JSON.stringify(requestBody)
