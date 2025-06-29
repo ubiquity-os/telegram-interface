@@ -19,6 +19,7 @@ import { UMPParser, RestApiMessageRequest } from './protocol/ump-parser.ts';
 import { UMPFormatter, ErrorResponseFormat } from './protocol/ump-formatter.ts';
 import { MessageRouter } from './message-router.ts';
 import { SessionManager } from './session-manager.ts';
+import { ApiGateway, GatewayRequest } from './api-gateway.ts';
 
 /**
  * Core API Server Configuration
@@ -53,6 +54,7 @@ export class CoreApiServer {
   private config: CoreApiServerConfig;
   private messageRouter: MessageRouter;
   private sessionManager: SessionManager;
+  private gateway: ApiGateway;
   private server?: Deno.HttpServer;
   private rateLimitTracker = new Map<string, { count: number; resetTime: number }>();
   private serverStartTime = Date.now();
@@ -60,11 +62,13 @@ export class CoreApiServer {
   constructor(
     config: CoreApiServerConfig,
     messageRouter: MessageRouter,
-    sessionManager: SessionManager
+    sessionManager: SessionManager,
+    gateway: ApiGateway
   ) {
     this.config = config;
     this.messageRouter = messageRouter;
     this.sessionManager = sessionManager;
+    this.gateway = gateway;
   }
 
   /**
@@ -245,11 +249,43 @@ export class CoreApiServer {
   }
 
   /**
-   * Handle send message requests
+   * Handle send message requests - route through API Gateway
    */
   private async handleSendMessage(req: Request): Promise<Response> {
     try {
       const body = await req.json() as RestApiMessageRequest;
+
+      // Create gateway request for HTTP API
+      const gatewayRequest: GatewayRequest = {
+        id: `http_api_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        source: 'http' as const,
+        timestamp: Date.now(),
+        userId: body.userId || 'api_user',
+        content: body.message || '',
+        metadata: {
+          sessionId: body.sessionId,
+          endpoint: 'messages',
+          apiVersion: 'v1',
+          messageMetadata: body.metadata || {}
+        },
+        originalRequest: req
+      };
+
+      // Process through gateway first
+      const gatewayResponse = await this.gateway.processRequest(gatewayRequest);
+
+      if (!gatewayResponse.success) {
+        this.log('warn', `Gateway rejected HTTP API request: ${gatewayResponse.error}`);
+        return this.createErrorResponse(
+          new UMPError(
+            `Request rejected by gateway: ${gatewayResponse.error}`,
+            UMPErrorType.VALIDATION_ERROR,
+            Platform.REST_API
+          ),
+          gatewayRequest.id,
+          400
+        );
+      }
 
       // Parse to UniversalMessage
       const universalMessage = await UMPParser.parseMessage(
@@ -280,7 +316,17 @@ export class CoreApiServer {
         Platform.REST_API
       );
 
-      return new Response(JSON.stringify(formattedResponse, null, 2), {
+      // Include gateway metrics in response
+      const responseWithMetrics = {
+        ...formattedResponse,
+        gateway: {
+          processed: true,
+          metrics: gatewayResponse.metrics,
+          requestId: gatewayRequest.id
+        }
+      };
+
+      return new Response(JSON.stringify(responseWithMetrics, null, 2), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });

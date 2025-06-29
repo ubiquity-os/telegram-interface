@@ -5,7 +5,7 @@
  * and manages the message flow through the system
  */
 
-import { injectable, inject } from 'npm:inversify@7.5.4';
+import { injectable, inject } from 'inversify';
 import { TYPES } from '../../core/types.ts';
 import {
   SystemOrchestratorConfig,

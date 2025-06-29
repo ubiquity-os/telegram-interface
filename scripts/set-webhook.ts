@@ -45,7 +45,7 @@ function printUsage() {
   console.log("");
   console.log("Environment variables needed:");
   console.log("  DEPLOY_TOKEN    - Deno Deploy API token");
-  console.log("  DEPLOY_PROJECT_NAME    - Project name (defaults to 'telegram-interface')");
+  console.log("  DEPLOY_PROJECT_NAME    - Project name (defaults to 'ubiquity-ai')");
 }
 
 async function setWebhookForBot(botType: BotType, manualUrl?: string): Promise<void> {

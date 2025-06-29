@@ -86,11 +86,11 @@ export class CircuitBreaker<T> {
     try {
       const result = await fn();
       const duration = Date.now() - startTime;
-      this.onSuccess(duration);
+      await this.onSuccess(duration);
       return result;
     } catch (error) {
       const duration = Date.now() - startTime;
-      this.onFailure(error as Error, duration);
+      await this.onFailure(error as Error, duration);
       throw error;
     }
   }

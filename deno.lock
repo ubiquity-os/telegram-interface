@@ -2,8 +2,8 @@
   "version": "3",
   "packages": {
     "specifiers": {
-      "npm:inversify@7.5.4": "npm:inversify@7.5.4_reflect-metadata@0.2.2",
-      "npm:reflect-metadata@0.2.2": "npm:reflect-metadata@0.2.2"
+      "npm:inversify@^7.5.4": "npm:inversify@7.5.4_reflect-metadata@0.2.2",
+      "npm:reflect-metadata@^0.2.2": "npm:reflect-metadata@0.2.2"
     },
     "npm": {
       "@inversifyjs/common@1.5.2": {
@@ -186,8 +186,8 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
-        "npm:inversify@7.5.4",
-        "npm:reflect-metadata@0.2.2"
+        "npm:inversify@^7.5.4",
+        "npm:reflect-metadata@^0.2.2"
       ]
     }
   }

@@ -2,7 +2,7 @@
  * Deno KV implementation of IContextStorage
  */
 
-import { injectable, unmanaged } from 'npm:inversify@7.5.4';
+import { injectable, unmanaged } from 'inversify';
 import {
   IContextStorage,
   StorageStats,

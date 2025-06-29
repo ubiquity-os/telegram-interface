@@ -5,7 +5,7 @@
  * using LLM-based analysis with caching for performance optimization
  */
 
-import { injectable, inject } from 'npm:inversify@7.5.4';
+import { injectable, inject } from 'inversify';
 import { TYPES } from '../../core/types.ts';
 
 import type {
@@ -55,17 +55,10 @@ export class MessagePreProcessor implements IMessagePreProcessor {
 
   constructor(
     @inject(TYPES.LLMService) llmService: ILLMService,
-    config?: Partial<MessagePreProcessorConfig>
+    @inject(TYPES.MessagePreProcessorConfig) config: MessagePreProcessorConfig
   ) {
     this.llmService = llmService;
-    this.config = {
-      maxCacheSize: 100,
-      cacheTTL: 3600000, // 1 hour
-      temperature: 0.3,
-      verbose: false,
-      confidenceThreshold: 0.6,
-      ...config
-    };
+    this.config = config;
 
     this.cache = new Map();
     this.stats = {

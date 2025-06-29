@@ -35,6 +35,7 @@ export const TYPES = {
   Config: Symbol.for('Config'),
   SystemOrchestratorConfig: Symbol.for('SystemOrchestratorConfig'),
   TelegramInterfaceAdapterConfig: Symbol.for('TelegramInterfaceAdapterConfig'),
+  ApiResponseAdapterConfig: Symbol.for('ApiResponseAdapterConfig'),
   MessagePreProcessorConfig: Symbol.for('MessagePreProcessorConfig'),
   DecisionEngineConfig: Symbol.for('DecisionEngineConfig'),
   ContextManagerConfig: Symbol.for('ContextManagerConfig'),

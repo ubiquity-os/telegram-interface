@@ -40,7 +40,7 @@ export class DenoDeployApi {
 
   constructor(token?: string, projectName?: string) {
     this.token = token || Deno.env.get("DEPLOY_TOKEN") || Deno.env.get("DENO_DEPLOY_TOKEN") || "";
-    this.projectName = projectName || Deno.env.get("DEPLOY_PROJECT_NAME") || "telegram-interface";
+    this.projectName = projectName || Deno.env.get("DEPLOY_PROJECT_NAME") || "ubiquity-ai";
 
     if (!this.token) {
       throw new Error("DEPLOY_TOKEN or DENO_DEPLOY_TOKEN environment variable is required");

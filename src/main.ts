@@ -14,12 +14,57 @@ import { TYPES } from "./core/types.ts";
 import { ISystemOrchestrator } from "./components/system-orchestrator/types.ts";
 import { ITelegramInterfaceAdapter } from "./interfaces/component-interfaces.ts";
 
+// Import API Gateway
+import { ApiGateway, GatewayConfig } from "./core/api-gateway.ts";
+import { TelemetryService, createDefaultTelemetryConfig, initializeTelemetry } from "./services/telemetry/index.ts";
+
 // Load config
 const config = await getConfig();
 
 // Initialize logging system early in the bootstrap process
 console.log("Initializing logging system...");
 await initializeLogging();
+
+// Initialize telemetry service for gateway
+console.log("Initializing telemetry service for API Gateway...");
+const telemetryConfig = createDefaultTelemetryConfig();
+const telemetry = await initializeTelemetry(telemetryConfig);
+
+// Initialize API Gateway
+console.log("Initializing API Gateway...");
+const gatewayConfig: GatewayConfig = {
+  rateLimiting: {
+    enabled: true,
+    windowMs: 60000, // 1 minute
+    maxRequests: {
+      telegram: 30,
+      http: 60,
+      cli: 100
+    },
+    cleanupInterval: 300000 // 5 minutes
+  },
+  middleware: {
+    enableLogging: true,
+    enableValidation: true,
+    enableTransformation: true,
+    enableAuthentication: true,
+    enableRateLimit: true
+  },
+  security: {
+    maxContentLength: 10000,
+    allowedCharacterPattern: /^[\s\S]*$/,
+    blockedPatterns: [
+      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+      /javascript:/gi,
+      /vbscript:/gi,
+      /onload\s*=/gi,
+      /onerror\s*=/gi
+    ]
+  }
+};
+
+const gateway = new ApiGateway(gatewayConfig, telemetry);
+await gateway.initialize();
 
 // Bootstrap the system using the DI container
 console.log("Bootstrapping system with dependency injection...");
@@ -32,6 +77,7 @@ const { container, orchestrator } = await bootstrap({
 const telegramAdapter = container.get<ITelegramInterfaceAdapter>(TYPES.TelegramInterfaceAdapter);
 
 console.log("System Orchestrator initialized successfully");
+console.log("API Gateway initialized and ready");
 
 // Export the orchestrator for use in handlers
 export { orchestrator as systemOrchestrator };
@@ -69,7 +115,7 @@ Deno.serve({
     });
   }
 
-  // Test message endpoint for E2E testing
+  // Test message endpoint for E2E testing - route through API Gateway
   if (url.pathname === "/test/message" && req.method === "POST") {
     try {
       const body = await req.json();
@@ -107,6 +153,36 @@ Deno.serve({
 
       console.log(`=== TEST ENDPOINT HIT ===`);
       console.log(`[TEST ENDPOINT] Processing test message: "${body.text}" from user ${body.userId} in chat ${body.chatId}`);
+
+      // Create gateway request for test endpoint
+      const gatewayRequest = {
+        id: `test_${Date.now()}`,
+        source: 'http' as const,
+        timestamp: Date.now(),
+        userId: body.userId,
+        content: body.text,
+        metadata: {
+          chatId: body.chatId,
+          endpoint: 'test',
+          testMode: true
+        },
+        originalRequest: req
+      };
+
+      // Process through gateway first
+      const gatewayResponse = await gateway.processRequest(gatewayRequest);
+
+      if (!gatewayResponse.success) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Gateway rejected test request",
+          details: gatewayResponse.error,
+          gatewayMetrics: gatewayResponse.metrics
+        }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
       // Enable test mode on telegram adapter
       console.log(`[TEST ENDPOINT] Enabling test mode on TelegramInterfaceAdapter...`);
@@ -191,7 +267,7 @@ Deno.serve({
 
       const processingTime = Date.now() - processingStartTime;
 
-      // Return response with captured data
+      // Return response with captured data and gateway metrics
       const result = {
         success: !capturedError,
         message: capturedError ? "Test message processing failed" : "Test message processed successfully with real LLM integration",
@@ -201,7 +277,9 @@ Deno.serve({
         testInput: body,
         telegramUpdate: testUpdate,
         timestamp: new Date().toISOString(),
-        note: "PROBLEM: This message was processed through SystemOrchestrator -> MessagePreProcessor (LLM) -> DecisionEngine -> ResponseGenerator, but the final response is sent via Telegram API calls that we cannot intercept in test mode."
+        gatewayProcessed: true,
+        gatewayMetrics: gatewayResponse.metrics,
+        note: "This message was processed through API Gateway -> SystemOrchestrator -> MessagePreProcessor (LLM) -> DecisionEngine -> ResponseGenerator, with middleware pipeline validation, rate limiting, and transformation."
       };
 
       console.log(`[TEST ENDPOINT] Real system processing complete, captured response:`, capturedResponse);
@@ -340,7 +418,7 @@ Deno.serve({
     }
   }
 
-  // Webhook endpoint
+  // Webhook endpoint - route through API Gateway
   if (url.pathname === `/webhook/${config.webhookSecret}` && req.method === "POST") {
     try {
       // Parse the update to check for duplicates
@@ -359,9 +437,33 @@ Deno.serve({
         console.log(`Processing new update: ${update.update_id}`);
       }
 
-      // Process the update asynchronously through the orchestrator
-      // This allows us to return 200 OK immediately
-      processUpdateAsync(update);
+      // Create gateway request for Telegram webhook
+      const gatewayRequest = {
+        id: `telegram_${update.update_id || Date.now()}`,
+        source: 'telegram' as const,
+        timestamp: Date.now(),
+        userId: update.message?.from?.id?.toString() || update.callback_query?.from?.id?.toString() || 'unknown',
+        content: update.message?.text || update.callback_query?.data || '',
+        metadata: {
+          updateId: update.update_id,
+          chatId: update.message?.chat?.id || update.callback_query?.message?.chat?.id,
+          messageId: update.message?.message_id || update.callback_query?.message?.message_id,
+          updateType: update.message ? 'message' : (update.callback_query ? 'callback_query' : 'unknown'),
+          rawUpdate: update
+        },
+        originalRequest: req
+      };
+
+      // Process through gateway
+      const gatewayResponse = await gateway.processRequest(gatewayRequest);
+
+      // If gateway processing was successful, process through orchestrator
+      if (gatewayResponse.success && gatewayResponse.data?.transformedRequest) {
+        // Process the update asynchronously through the orchestrator
+        processUpdateAsync(update);
+      } else {
+        console.warn('Gateway rejected Telegram update:', gatewayResponse.error);
+      }
 
       return new Response("OK", { status: 200 });
     } catch (error) {

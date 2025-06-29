@@ -3,6 +3,7 @@
  * Now includes circuit breaker protection against Telegram API failures
  */
 
+import { injectable, inject } from 'inversify';
 import { Bot } from "grammy";
 import {
   ITelegramInterfaceAdapter,
@@ -14,8 +15,8 @@ import {
   TelegramResponse
 } from '../../interfaces/message-types.ts';
 import { IMessageInterface, GenericResponse } from '../../interfaces/message-interface.ts';
+import type { TelegramInterfaceAdapterConfig } from './types.ts';
 import {
-  TelegramInterfaceAdapterConfig,
   QueuedMessage,
   RateLimitState,
   DeduplicationEntry
@@ -23,7 +24,9 @@ import {
 import { createEventEmitter, SystemEventType } from '../../services/event-bus/index.ts';
 import { CircuitBreaker, CircuitOpenError } from '../../reliability/circuit-breaker.ts';
 import { getCircuitBreakerConfig } from '../../reliability/circuit-breaker-configs.ts';
+import { TYPES } from '../../core/types.ts';
 
+@injectable()
 export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter, IMessageInterface {
   public readonly name = 'TelegramInterfaceAdapter';
 
@@ -40,7 +43,7 @@ export class TelegramInterfaceAdapter implements ITelegramInterfaceAdapter, IMes
   // Test mode - captures responses instead of sending to Telegram
   private capturedResponses: Map<number, string> = new Map();
 
-  constructor(config: TelegramInterfaceAdapterConfig) {
+  constructor(@inject(TYPES.TelegramInterfaceAdapterConfig) config: TelegramInterfaceAdapterConfig) {
     this.config = config;
     this.eventEmitter = createEventEmitter('TelegramInterfaceAdapter');
 

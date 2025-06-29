@@ -3,7 +3,7 @@
  * Phase 1.1: Uses READY/PROCESSING/COMPLETED/ERROR states with phase metadata
  */
 
-import { injectable, inject } from 'npm:inversify@7.5.4';
+import { injectable, inject } from 'inversify';
 import { TYPES } from '../../core/types.ts';
 import { DecisionStateMachine, DecisionEvent } from './state-machine.ts';
 import {

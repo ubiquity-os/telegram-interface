@@ -5,8 +5,8 @@
  * and manages the dependency graph for the application
  */
 
-import 'npm:reflect-metadata@0.2.2';
-import { Container } from 'npm:inversify@7.5.4';
+import 'reflect-metadata';
+import { Container } from 'inversify';
 import { TYPES } from './types.ts';
 
 // Import interfaces
@@ -40,6 +40,7 @@ import { KVContextStorage } from '../components/context-manager/kv-context-stora
 // Import configuration types
 import { SystemOrchestratorConfig } from '../components/system-orchestrator/types.ts';
 import { TelegramInterfaceAdapterConfig } from '../components/telegram-interface-adapter/types.ts';
+import { ApiResponseAdapterConfig } from '../adapters/api-response-adapter.ts';
 import { MessagePreProcessorConfig } from '../components/message-pre-processor/types.ts';
 import { DecisionEngineConfig } from '../components/decision-engine/types.ts';
 import { ContextManagerConfig } from '../components/context-manager/types.ts';
@@ -72,6 +73,14 @@ export function createContainer(): Container {
         processingInterval: 100,
         maxRetries: 3
       }
+    });
+
+  container.bind<ApiResponseAdapterConfig>(TYPES.ApiResponseAdapterConfig)
+    .toConstantValue({
+      enableLogging: true,
+      logLevel: 'info',
+      responseFormat: 'json',
+      includeMetadata: true
     });
 
   container.bind<MessagePreProcessorConfig>(TYPES.MessagePreProcessorConfig)

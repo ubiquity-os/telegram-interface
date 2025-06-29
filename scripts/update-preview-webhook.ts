@@ -98,7 +98,7 @@ function printUsage() {
   console.log("  PREVIEW_BOT_TOKEN           - Telegram bot token for preview bot");
   console.log("  WEBHOOK_SECRET_PREVIEW      - Webhook secret for preview bot");
   console.log("  DEPLOY_TOKEN           - Deno Deploy API token");
-  console.log("  DEPLOY_PROJECT_NAME           - Deno Deploy project name (optional, defaults to 'telegram-interface')");
+  console.log("  DEPLOY_PROJECT_NAME           - Deno Deploy project name (optional, defaults to 'ubiquity-ai')");
   console.log("");
   console.log("This script is designed for CI/CD use and automatically:");
   console.log("1. Queries Deno Deploy API for the latest preview deployment");

@@ -97,7 +97,7 @@ export class ProtocolHandler {
           sampling: {}
         },
         clientInfo: {
-          name: "telegram-interface",
+          name: "ubiquity-ai",
           version: "1.0.0"
         }
       },

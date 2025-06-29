@@ -5,7 +5,7 @@
  * required by the MessagePreProcessor
  */
 
-import { injectable, inject } from 'npm:inversify@7.5.4';
+import { injectable, inject } from 'inversify';
 import type { ILLMService } from './types.ts';
 import { LlmService, LLMMessage } from '../../services/llm-service/index.ts';
 import { TYPES } from '../../core/types.ts';

@@ -4,6 +4,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { promises as fs } from 'node:fs';
 
 /**
  * Structured log interface for consistent logging format
@@ -77,7 +78,7 @@ export class TelemetryService {
   private config: TelemetryConfig;
   private asyncLocalStorage = new AsyncLocalStorage<TraceContext>();
   private isInitialized = false;
-  private logFileHandle: Deno.FsFile | null = null;
+  private logFileHandle: any = null;
   private currentLogFile: string | null = null;
 
   private constructor(config: TelemetryConfig) {
@@ -419,9 +420,9 @@ export class TelemetryService {
    */
   private async ensureLogDirectory(): Promise<void> {
     try {
-      await Deno.mkdir(this.config.fileExporter.directory, { recursive: true });
-    } catch (error) {
-      if (!(error instanceof Deno.errors.AlreadyExists)) {
+      await fs.mkdir(this.config.fileExporter.directory, { recursive: true });
+    } catch (error: any) {
+      if (error.code !== 'EEXIST') {
         throw error;
       }
     }
@@ -445,11 +446,7 @@ export class TelemetryService {
       }
 
       // Open new file
-      this.logFileHandle = await Deno.open(newLogFile, {
-        create: true,
-        write: true,
-        append: true
-      });
+      this.logFileHandle = await fs.open(newLogFile, 'a');
 
       this.currentLogFile = newLogFile;
 
@@ -508,11 +505,12 @@ export class TelemetryService {
 
     try {
       const files = [];
-      for await (const dirEntry of Deno.readDir(this.config.fileExporter.directory)) {
-        if (dirEntry.isFile && dirEntry.name.startsWith('traces-') && dirEntry.name.endsWith('.jsonl')) {
-          const filePath = `${this.config.fileExporter.directory}/${dirEntry.name}`;
-          const stat = await Deno.stat(filePath);
-          files.push({ name: dirEntry.name, path: filePath, mtime: stat.mtime || new Date(0) });
+      const dirEntries = await fs.readdir(this.config.fileExporter.directory);
+      for (const fileName of dirEntries) {
+        if (fileName.startsWith('traces-') && fileName.endsWith('.jsonl')) {
+          const filePath = `${this.config.fileExporter.directory}/${fileName}`;
+          const stat = await fs.stat(filePath);
+          files.push({ name: fileName, path: filePath, mtime: stat.mtime || new Date(0) });
         }
       }
 
@@ -522,7 +520,7 @@ export class TelemetryService {
       // Remove files beyond maxFiles limit
       for (let i = maxFiles; i < files.length; i++) {
         try {
-          await Deno.remove(files[i].path);
+          await fs.unlink(files[i].path);
           console.log(`[TelemetryService] Removed old log file: ${files[i].name}`);
         } catch (error) {
           console.warn(`[TelemetryService] Failed to remove old log file ${files[i].name}:`, error);
@@ -575,7 +573,7 @@ export function createDefaultTelemetryConfig(): TelemetryConfig {
   const environment = Deno.env.get('ENVIRONMENT') || 'development';
 
   return {
-    serviceName: 'telegram-interface',
+    serviceName: 'ubiquity-ai',
     version: '1.0.0',
     environment,
     fileExporter: {

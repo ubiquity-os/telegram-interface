@@ -5,9 +5,11 @@
  * ensuring the core system is decoupled from Telegram-specific logic.
  */
 
+import { injectable, inject } from 'inversify';
 import { IMessageInterface, GenericResponse, InterfacePlatform } from '../interfaces/message-interface.ts';
 import { ComponentStatus } from '../interfaces/component-interfaces.ts';
 import { createEventEmitter, SystemEventType } from '../services/event-bus/index.ts';
+import { TYPES } from '../core/types.ts';
 
 /**
  * Configuration for API Response Adapter
@@ -38,6 +40,7 @@ export interface CapturedResponse {
  * - Providing JSON/text formatted output
  * - NOT sending to external platforms like Telegram
  */
+@injectable()
 export class ApiResponseAdapter implements IMessageInterface {
   public readonly name = 'ApiResponseAdapter';
 
@@ -46,7 +49,7 @@ export class ApiResponseAdapter implements IMessageInterface {
   private eventEmitter: ReturnType<typeof createEventEmitter>;
   private isInitialized = false;
 
-  constructor(config: ApiResponseAdapterConfig) {
+  constructor(@inject(TYPES.ApiResponseAdapterConfig) config: ApiResponseAdapterConfig) {
     this.config = config;
     this.eventEmitter = createEventEmitter('ApiResponseAdapter');
   }

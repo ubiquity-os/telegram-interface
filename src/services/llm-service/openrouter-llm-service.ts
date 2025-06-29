@@ -6,7 +6,7 @@
  * our complex sequential racing system with OpenRouter's built-in routing.
  */
 
-import { injectable } from 'npm:inversify@7.5.4';
+import { injectable } from 'inversify';
 import { CircuitBreaker } from '../../reliability/circuit-breaker.ts';
 import { getCircuitBreakerConfig } from '../../reliability/circuit-breaker-configs.ts';
 import { errorRecoveryService } from '../../services/error-recovery-service.ts';
@@ -92,7 +92,7 @@ export class OpenRouterLlmService {
     }
 
     // Get API key from environment or config
-    this.apiKey = config.apiKey || Deno.env.get('OPENROUTER_API_KEY') || '';
+    this.apiKey = config.apiKey || process.env('OPENROUTER_API_KEY') || '';
 
     if (!this.apiKey) {
       console.error('[OpenRouterLlmService] CRITICAL: No OpenRouter API key found');
@@ -314,7 +314,7 @@ export class OpenRouterLlmService {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://github.com/ubiquity-os/telegram-interface',
+          'HTTP-Referer': 'https://github.com/ubiquity-os/ubiquity-ai',
           'X-Title': 'UbiquityAI'
         },
         body: JSON.stringify(requestBody)
@@ -452,7 +452,7 @@ export class OpenRouterLlmService {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://github.com/ubiquity-os/telegram-interface',
+          'HTTP-Referer': 'https://github.com/ubiquity-os/ubiquity-ai',
           'X-Title': 'UbiquityAI'
         },
         body: JSON.stringify(requestBody)
