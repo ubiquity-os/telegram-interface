@@ -117,6 +117,17 @@ export class EventBus implements IEventBus {
   }
 
   /**
+   * Subscribe to an event (alias for on method)
+   */
+  subscribe<T extends SystemEvent>(
+    eventType: T['type'],
+    handler: EventHandler<T>,
+    options: SubscriptionOptions = {}
+  ): string {
+    return this.on(eventType, handler, options);
+  }
+
+  /**
    * Emit an event
    */
   async emit<T extends SystemEvent>(event: T): Promise<void> {

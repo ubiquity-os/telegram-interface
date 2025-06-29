@@ -15,7 +15,7 @@ import { ISystemOrchestrator } from "./components/system-orchestrator/types.ts";
 import { ITelegramInterfaceAdapter } from "./interfaces/component-interfaces.ts";
 
 // Import API Gateway
-import { ApiGateway, GatewayConfig } from "./core/api-gateway.ts";
+import { ApiGateway, ApiGatewayConfig } from "./core/api-gateway.ts";
 import { TelemetryService, createDefaultTelemetryConfig, initializeTelemetry } from "./services/telemetry/index.ts";
 
 // Load config
@@ -32,35 +32,55 @@ const telemetry = await initializeTelemetry(telemetryConfig);
 
 // Initialize API Gateway
 console.log("Initializing API Gateway...");
-const gatewayConfig: GatewayConfig = {
+const gatewayConfig: ApiGatewayConfig = {
   rateLimiting: {
-    enabled: true,
-    windowMs: 60000, // 1 minute
-    maxRequests: {
-      telegram: 30,
-      http: 60,
-      cli: 100
+    telegram: {
+      windowMs: 60000,
+      maxRequests: 30,
+      keyGenerator: (req) => req.userId,
+      enabled: true,
     },
-    cleanupInterval: 300000 // 5 minutes
+    http: {
+      windowMs: 60000,
+      maxRequests: 60,
+      keyGenerator: (req) => req.userId,
+      enabled: true,
+    },
+    cli: {
+      windowMs: 60000,
+      maxRequests: 100,
+      keyGenerator: (req) => req.userId,
+      enabled: true,
+    },
   },
   middleware: {
     enableLogging: true,
     enableValidation: true,
     enableTransformation: true,
-    enableAuthentication: true,
-    enableRateLimit: true
+    enableAuth: true,
   },
-  security: {
-    maxContentLength: 10000,
-    allowedCharacterPattern: /^[\s\S]*$/,
-    blockedPatterns: [
-      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-      /javascript:/gi,
-      /vbscript:/gi,
-      /onload\s*=/gi,
-      /onerror\s*=/gi
-    ]
-  }
+  performance: {
+    requestTimeout: 30000,
+    maxConcurrentRequests: 100,
+  },
+  debug: {
+    logRequests: true,
+    logResponses: true,
+    logMiddleware: true,
+  },
+};
+
+// Security configuration (separate from gateway config)
+const securityConfig = {
+  maxContentLength: 10000,
+  allowedCharacterPattern: /^[\s\S]*$/,
+  blockedPatterns: [
+    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+    /javascript:/gi,
+    /vbscript:/gi,
+    /onload\s*=/gi,
+    /onerror\s*=/gi,
+  ],
 };
 
 const gateway = new ApiGateway(gatewayConfig, telemetry);
@@ -70,7 +90,7 @@ await gateway.initialize();
 console.log("Bootstrapping system with dependency injection...");
 const { container, orchestrator } = await bootstrap({
   botToken: config.botToken,
-  webhookSecret: config.webhookSecret
+  webhookSecret: config.webhookSecret,
 });
 
 // Get telegram adapter for test mode functionality
@@ -109,7 +129,7 @@ Deno.serve({
     return new Response(JSON.stringify({
       status: "ok",
       timestamp: new Date().toISOString(),
-      deduplicationCacheSize: deduplicationService.getSize()
+      deduplicationCacheSize: deduplicationService.getSize(),
     }), {
       headers: { "Content-Type": "application/json" },
     });
@@ -124,7 +144,7 @@ Deno.serve({
       if (!body.text || typeof body.text !== "string") {
         return new Response(JSON.stringify({
           success: false,
-          error: "Missing or invalid 'text' field"
+          error: "Missing or invalid 'text' field",
         }), {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -134,7 +154,7 @@ Deno.serve({
       if (!body.chatId || typeof body.chatId !== "string") {
         return new Response(JSON.stringify({
           success: false,
-          error: "Missing or invalid 'chatId' field"
+          error: "Missing or invalid 'chatId' field",
         }), {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -144,7 +164,7 @@ Deno.serve({
       if (!body.userId || typeof body.userId !== "string") {
         return new Response(JSON.stringify({
           success: false,
-          error: "Missing or invalid 'userId' field"
+          error: "Missing or invalid 'userId' field",
         }), {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -158,15 +178,15 @@ Deno.serve({
       const gatewayRequest = {
         id: `test_${Date.now()}`,
         source: 'http' as const,
-        timestamp: Date.now(),
+        timestamp: new Date(),
         userId: body.userId,
         content: body.text,
         metadata: {
           chatId: body.chatId,
           endpoint: 'test',
-          testMode: true
+          testMode: true,
         },
-        originalRequest: req
+        originalRequest: req,
       };
 
       // Process through gateway first
@@ -177,7 +197,7 @@ Deno.serve({
           success: false,
           error: "Gateway rejected test request",
           details: gatewayResponse.error,
-          gatewayMetrics: gatewayResponse.metrics
+          gatewayMetrics: gatewayResponse.metadata,
         }), {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -202,15 +222,15 @@ Deno.serve({
           date: Math.floor(Date.now() / 1000),
           chat: {
             id: parseInt(body.chatId),
-            type: "private"
+            type: "private",
           },
           from: {
             id: parseInt(body.userId),
             is_bot: false,
-            first_name: "Test User"
+            first_name: "Test User",
           },
-          text: body.text
-        }
+          text: body.text,
+        },
       };
 
       console.log(`[TEST ENDPOINT] Created TelegramUpdate:`, JSON.stringify(testUpdate, null, 2));
@@ -278,8 +298,8 @@ Deno.serve({
         telegramUpdate: testUpdate,
         timestamp: new Date().toISOString(),
         gatewayProcessed: true,
-        gatewayMetrics: gatewayResponse.metrics,
-        note: "This message was processed through API Gateway -> SystemOrchestrator -> MessagePreProcessor (LLM) -> DecisionEngine -> ResponseGenerator, with middleware pipeline validation, rate limiting, and transformation."
+        gatewayMetrics: gatewayResponse.metadata,
+        note: "This message was processed through API Gateway -> SystemOrchestrator -> MessagePreProcessor (LLM) -> DecisionEngine -> ResponseGenerator, with middleware pipeline validation, rate limiting, and transformation.",
       };
 
       console.log(`[TEST ENDPOINT] Real system processing complete, captured response:`, capturedResponse);
@@ -293,7 +313,7 @@ Deno.serve({
       return new Response(JSON.stringify({
         success: false,
         error: "Failed to process test message through real system",
-        details: error.message
+        details: error.message,
       }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
@@ -316,7 +336,7 @@ Deno.serve({
         const chatId = parseInt(chatIdParam);
         if (isNaN(chatId)) {
           return new Response(JSON.stringify({
-            error: "Invalid chatId parameter"
+            error: "Invalid chatId parameter",
           }), {
             status: 400,
             headers: { "Content-Type": "application/json" },
@@ -337,7 +357,7 @@ Deno.serve({
           messageCount: history.length,
           totalTokens,
           messages: history,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         }, null, 2), {
           headers: { "Content-Type": "application/json" },
         });
@@ -373,7 +393,7 @@ Deno.serve({
             firstMessageTime: messages[0]?.timestamp ? new Date(messages[0].timestamp).toISOString() : null,
             lastMessageTime: messages[messages.length - 1]?.timestamp ? new Date(messages[messages.length - 1].timestamp).toISOString() : null,
             // Include actual messages if not too many
-            messages: messages.length <= 10 ? messages : `[${messages.length} messages - use ?chatId=${chatId} to view all]`
+            messages: messages.length <= 10 ? messages : `[${messages.length} messages - use ?chatId=${chatId} to view all]`,
           });
 
           count++;
@@ -387,7 +407,7 @@ Deno.serve({
         stats: {
           totalChats: stats.totalChats,
           totalMessages: stats.totalMessages,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         },
         conversations: conversations.sort((a, b) => {
           // Sort by last message time, newest first
@@ -399,9 +419,9 @@ Deno.serve({
           available: ["chatId", "limit"],
           examples: [
             "/conversations?chatId=123456789",
-            "/conversations?limit=5"
-          ]
-        }
+            "/conversations?limit=5",
+          ],
+        },
       }, null, 2), {
         headers: { "Content-Type": "application/json" },
       });
@@ -410,7 +430,7 @@ Deno.serve({
       console.error("Conversations endpoint error:", error);
       return new Response(JSON.stringify({
         error: "Failed to retrieve conversation data",
-        details: error.message
+        details: error.message,
       }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
@@ -441,7 +461,7 @@ Deno.serve({
       const gatewayRequest = {
         id: `telegram_${update.update_id || Date.now()}`,
         source: 'telegram' as const,
-        timestamp: Date.now(),
+        timestamp: new Date(),
         userId: update.message?.from?.id?.toString() || update.callback_query?.from?.id?.toString() || 'unknown',
         content: update.message?.text || update.callback_query?.data || '',
         metadata: {
@@ -449,9 +469,9 @@ Deno.serve({
           chatId: update.message?.chat?.id || update.callback_query?.message?.chat?.id,
           messageId: update.message?.message_id || update.callback_query?.message?.message_id,
           updateType: update.message ? 'message' : (update.callback_query ? 'callback_query' : 'unknown'),
-          rawUpdate: update
+          rawUpdate: update,
         },
-        originalRequest: req
+        originalRequest: req,
       };
 
       // Process through gateway

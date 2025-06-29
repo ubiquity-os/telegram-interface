@@ -11,6 +11,33 @@ import { eventBus, SystemEventType } from '../services/event-bus/index.ts';
 /**
  * Request interface that normalizes different input formats
  */
+export interface GatewayRequest {
+  id: string;
+  source: string;
+  timestamp: Date;
+  userId: string;
+  content: any;
+  metadata: Record<string, unknown>;
+  originalRequest: Request;
+}
+
+export interface GatewayResponse {
+  success: boolean;
+  requestId: string;
+  timestamp: Date;
+  data?: any;
+  error?: {
+    code: string;
+    message: string;
+    details?: any;
+  };
+  metadata: {
+    processingTime: number;
+    middlewareChain: string[];
+    source: string;
+  };
+}
+
 export interface IncomingRequest {
   id: string;
   timestamp: Date;
@@ -172,7 +199,9 @@ export class ApiGateway {
 
       // Emit initialization event
       eventBus.emit({
+        id: `component_initialized_${Date.now()}`,
         type: SystemEventType.COMPONENT_INITIALIZED,
+        timestamp: new Date(),
         source: 'ApiGateway',
         payload: {
           componentName: 'ApiGateway',

@@ -83,12 +83,12 @@ export class DebugService {
 
       this.isInitialized = true;
 
-      await this.telemetry.logStructured(
-        LogLevel.INFO,
-        'DebugService',
-        'initialization',
-        'Debug service initialized successfully',
-        {
+      await this.telemetry.logStructured({
+        level: LogLevel.INFO,
+        component: 'DebugService',
+        phase: 'initialization',
+        message: 'Debug service initialized successfully',
+        metadata: {
           debugEnabled: this.globalConfig.enabled,
           verboseLogging: this.globalConfig.verboseLogging,
           features: {
@@ -101,7 +101,7 @@ export class DebugService {
             logCircuitBreakerEvents: this.globalConfig.logCircuitBreakerEvents
           }
         }
-      );
+      });
 
       console.log('[DebugService] Initialized successfully');
     } catch (error) {
@@ -179,16 +179,16 @@ export class DebugService {
       return;
     }
 
-    await this.telemetry.logStructured(
-      LogLevel.DEBUG,
-      logComponent,
-      phase,
-      message,
-      {
+    await this.telemetry.logStructured({
+      level: LogLevel.DEBUG,
+      component: logComponent,
+      phase: phase,
+      message: message,
+      metadata: {
         debugMode: true,
         ...metadata
       }
-    );
+    });
   }
 
   /**

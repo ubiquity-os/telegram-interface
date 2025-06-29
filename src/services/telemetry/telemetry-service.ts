@@ -3,8 +3,22 @@
  * Phase 2.1: Structured logging with OpenTelemetry for comprehensive system observability
  */
 
+// deno-lint-ignore-file no-unused-vars
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { promises as fs } from 'node:fs';
+
+interface FileInfo {
+  name: string;
+  path: string;
+  mtime: Date;
+}
+
+/// <reference types="deno/types" />
+declare const Deno: {
+  env: {
+    get(key: string): string | undefined;
+  };
+}; // Specific Deno type declaration
 
 /**
  * Structured log interface for consistent logging format
@@ -18,6 +32,7 @@ export interface StructuredLog {
   message: string;
   metadata: Record<string, any>;
   duration?: number;
+  isRetryableError?: boolean;
   error?: {
     type: string;
     message: string;
@@ -119,12 +134,18 @@ export class TelemetryService {
       console.log(`[TelemetryService] Initialized successfully. Logs directory: ${this.config.fileExporter.directory}`);
 
       // Log the initialization
-      await this.logStructured(LogLevel.INFO, 'TelemetryService', 'initialization', 'Telemetry service initialized', {
+      await this.logStructured({
+      level: LogLevel.INFO,
+      component: 'TelemetryService',
+      phase: 'initialization',
+      message: 'Telemetry service initialized',
+      metadata: {
         serviceName: this.config.serviceName,
         version: this.config.version,
         environment: this.config.environment,
         logDirectory: this.config.fileExporter.directory
-      });
+      }
+    });
 
     } catch (error) {
       console.error('[TelemetryService] Failed to initialize:', error);
@@ -173,10 +194,16 @@ export class TelemetryService {
     // Store in async local storage for automatic propagation
     this.asyncLocalStorage.enterWith(context);
 
-    await this.logStructured(LogLevel.DEBUG, component, phase, 'Trace started', {
-      traceId,
-      spanId,
-      operation: 'trace_start'
+    await this.logStructured({
+      level: LogLevel.DEBUG,
+      component,
+      phase,
+      message: 'Trace started',
+      metadata: {
+        traceId,
+        spanId,
+        operation: 'trace_start'
+      }
     });
 
     return traceCorrelationId;
@@ -195,20 +222,35 @@ export class TelemetryService {
     const duration = Date.now() - context.startTime;
 
     if (error) {
-      await this.logStructured(LogLevel.ERROR, context.component, context.phase, 'Trace ended with error', {
-        traceId: context.traceId,
-        spanId: context.spanId,
+      await this.logStructured({
+        level: LogLevel.ERROR,
+        component: context.component,
+        phase: context.phase,
+        message: 'Trace ended with error',
+        metadata: {
+          traceId: context.traceId,
+          spanId: context.spanId,
+          duration,
+          operation: 'trace_end'
+        },
         duration,
-        operation: 'trace_end'
-      }, duration, error);
+        error
+      });
     } else {
-      await this.logStructured(LogLevel.DEBUG, context.component, context.phase, 'Trace ended successfully', {
-        traceId: context.traceId,
-        spanId: context.spanId,
-        duration,
-        operation: 'trace_end',
-        result: this.config.enableDebugLogs ? result : '[redacted]'
-      }, duration);
+      await this.logStructured({
+        level: LogLevel.DEBUG,
+        component: context.component,
+        phase: context.phase,
+        message: 'Trace ended successfully',
+        metadata: {
+          traceId: context.traceId,
+          spanId: context.spanId,
+          duration,
+          operation: 'trace_end',
+          result: this.config.enableDebugLogs ? result : '[redacted]'
+        },
+        duration
+      });
     }
   }
 
@@ -232,12 +274,18 @@ export class TelemetryService {
 
     this.asyncLocalStorage.enterWith(newContext);
 
-    await this.logStructured(LogLevel.DEBUG, context.component, operation, 'Span started', {
-      traceId: context.traceId,
-      parentSpanId: context.spanId,
-      spanId,
-      operation: 'span_start',
-      ...metadata
+    await this.logStructured({
+      level: LogLevel.DEBUG,
+      component: context.component,
+      phase: operation,
+      message: 'Span started',
+      metadata: {
+        traceId: context.traceId,
+        parentSpanId: context.spanId,
+        spanId,
+        operation: 'span_start',
+        ...metadata
+      }
     });
 
     return spanId;
@@ -256,35 +304,51 @@ export class TelemetryService {
     const duration = Date.now() - context.startTime;
 
     if (error) {
-      await this.logStructured(LogLevel.ERROR, context.component, context.phase, 'Span ended with error', {
-        traceId: context.traceId,
-        spanId: context.spanId,
+      await this.logStructured({
+        level: LogLevel.ERROR,
+        component: context.component,
+        phase: context.phase,
+        message: 'Span ended with error',
+        metadata: {
+          traceId: context.traceId,
+          spanId: context.spanId,
+          duration,
+          operation: 'span_end'
+        },
         duration,
-        operation: 'span_end'
-      }, duration, error);
+        error
+      });
     } else {
-      await this.logStructured(LogLevel.DEBUG, context.component, context.phase, 'Span ended successfully', {
-        traceId: context.traceId,
-        spanId: context.spanId,
-        duration,
-        operation: 'span_end',
-        result: this.config.enableDebugLogs ? result : '[redacted]'
-      }, duration);
+      await this.logStructured({
+        level: LogLevel.DEBUG,
+        component: context.component,
+        phase: context.phase,
+        message: 'Span ended successfully',
+        metadata: {
+          traceId: context.traceId,
+          spanId: context.spanId,
+          duration,
+          operation: 'span_end',
+          result: this.config.enableDebugLogs ? result : '[redacted]'
+        },
+        duration
+      });
     }
   }
 
   /**
    * Log structured message
    */
-  async logStructured(
-    level: LogLevel,
-    component: string,
-    phase: string,
-    message: string,
-    metadata: Record<string, any> = {},
-    duration?: number,
-    error?: Error
-  ): Promise<void> {
+  async logStructured(options: {
+    level: LogLevel;
+    component: string;
+    phase: string;
+    message: string;
+    metadata?: Record<string, any>;
+    duration?: number;
+    error?: Error;
+  }): Promise<void> {
+    const { level, component, phase, message, metadata = {}, duration, error } = options;
     const context = this.getCurrentContext();
     const correlationId = context?.correlationId || 'no-correlation';
 
@@ -327,7 +391,14 @@ export class TelemetryService {
     const component = context?.component || 'unknown';
     const phase = context?.phase || 'unknown';
 
-    await this.logStructured(level, component, phase, message, metadata, undefined, error);
+    await this.logStructured({
+      level,
+      component,
+      phase,
+      message,
+      metadata,
+      error
+    });
   }
 
   /**
@@ -510,7 +581,12 @@ export class TelemetryService {
         if (fileName.startsWith('traces-') && fileName.endsWith('.jsonl')) {
           const filePath = `${this.config.fileExporter.directory}/${fileName}`;
           const stat = await fs.stat(filePath);
-          files.push({ name: fileName, path: filePath, mtime: stat.mtime || new Date(0) });
+          const fileInfo = {
+            name: fileName,
+            path: filePath,
+            mtime: stat.mtime || new Date(0)
+          };
+          files.push(fileInfo as FileInfo);
         }
       }
 
@@ -537,9 +613,15 @@ export class TelemetryService {
   async shutdown(): Promise<void> {
     if (this.logFileHandle) {
       try {
-        await this.logStructured(LogLevel.INFO, 'TelemetryService', 'shutdown', 'Telemetry service shutting down', {
+        await this.logStructured({
+      level: LogLevel.INFO,
+      component: 'TelemetryService',
+      phase: 'shutdown',
+      message: 'Telemetry service shutting down',
+      metadata: {
           operation: 'shutdown'
-        });
+        }
+    });
 
         this.logFileHandle.close();
         this.logFileHandle = null;
@@ -570,7 +652,7 @@ export class TelemetryService {
  * Create default telemetry configuration
  */
 export function createDefaultTelemetryConfig(): TelemetryConfig {
-  const environment = Deno.env.get('ENVIRONMENT') || 'development';
+  const environment = Deno.env.get('ENVIRONMENT') ?? 'development';
 
   return {
     serviceName: 'ubiquity-ai',

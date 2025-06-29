@@ -200,6 +200,6 @@ export class AuthenticationMiddleware implements Middleware {
   private validateApiKey(apiKey: string): boolean {
     // Placeholder for future API key validation
     // Could check against environment variables or database
-    return apiKey && apiKey.length > 10;
+    return !!(apiKey && apiKey.length > 10);
   }
 }

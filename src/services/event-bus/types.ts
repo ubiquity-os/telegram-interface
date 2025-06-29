@@ -35,6 +35,7 @@ export enum SystemEventType {
   MODERATION_COMPLETE = 'moderation.complete',
 
   // Error events
+  ERROR_RECOVERED = 'error.recovered',
   ERROR_OCCURRED = 'error.occurred',
 
   // Component lifecycle events
@@ -44,7 +45,11 @@ export enum SystemEventType {
 
   // System events
   SYSTEM_READY = 'system.ready',
-  SYSTEM_SHUTDOWN = 'system.shutdown'
+  SYSTEM_SHUTDOWN = 'system.shutdown',
+
+  // Tool discovery events
+  TOOL_CHANGE = 'tool.change',
+  TOOL_AVAILABILITY_CHANGE = 'tool.availability.change'
 }
 
 /**
@@ -56,6 +61,8 @@ export interface BaseEvent {
   timestamp: Date;
   source: string;
   metadata?: Record<string, any>;
+  priority?: number;
+  attachments?: any[];
 }
 
 /**
@@ -196,6 +203,15 @@ export interface ModerationCompleteEvent extends BaseEvent {
 /**
  * Error occurred event
  */
+export interface ErrorRecoveredEvent extends BaseEvent {
+  type: SystemEventType.ERROR_RECOVERED;
+  payload: {
+    error: Error;
+    recoveryStrategy: string;
+    component: string;
+  };
+}
+
 export interface ErrorOccurredEvent extends BaseEvent {
   type: SystemEventType.ERROR_OCCURRED;
   payload: {
@@ -264,6 +280,7 @@ export type SystemEvent =
   | ModerationModifiedEvent
   | ModerationFailedEvent
   | ModerationCompleteEvent
+  | ErrorRecoveredEvent
   | ErrorOccurredEvent
   | ComponentInitializedEvent
   | ComponentShutdownEvent
@@ -319,6 +336,12 @@ export interface IEventBus {
     eventType: T['type'],
     handler: EventHandler<T>,
     options?: Omit<SubscriptionOptions, 'once'>
+  ): string;
+
+  subscribe<T extends SystemEvent>(
+    eventType: T['type'],
+    handler: EventHandler<T>,
+    options?: SubscriptionOptions
   ): string;
 
   emit<T extends SystemEvent>(event: T): Promise<void>;

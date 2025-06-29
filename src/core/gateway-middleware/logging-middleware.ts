@@ -64,13 +64,13 @@ export class LoggingMiddleware implements Middleware {
   private async logRequest(request: IncomingRequest): Promise<void> {
     const logData = this.createRequestLogData(request);
 
-    await this.telemetry.logStructured(
-      LogLevel.INFO,
-      'ApiGateway',
-      'request-received',
-      `Request received from ${request.source}`,
-      logData
-    );
+    await this.telemetry.logStructured({
+      level: LogLevel.INFO,
+      component: 'ApiGateway',
+      phase: 'request-received',
+      message: `Request received from ${request.source}`,
+      metadata: logData
+    });
 
     // Log detailed debug information if debug logging is enabled
     if (this.shouldLogDebugDetails(request)) {
@@ -118,8 +118,8 @@ export class LoggingMiddleware implements Middleware {
    */
   private shouldLogDebugDetails(request: IncomingRequest): boolean {
     // Log debug details for development or when explicitly enabled
-    const debugEnabled = process.env('DEBUG_GATEWAY') === 'true';
-    const verboseEnabled = process.env('DEBUG_VERBOSE') === 'true';
+    const debugEnabled = Deno.env.get('DEBUG_GATEWAY') === 'true';
+    const verboseEnabled = Deno.env.get('DEBUG_VERBOSE') === 'true';
 
     return debugEnabled || verboseEnabled;
   }
@@ -136,19 +136,19 @@ export class LoggingMiddleware implements Middleware {
         rawPayload: request.rawPayload
       },
       environment: {
-        nodeEnv: process.env('ENVIRONMENT'),
-        botType: process.env('BOT_TYPE'),
-        logLevel: process.env('LOG_LEVEL')
+        nodeEnv: Deno.env.get('ENVIRONMENT'),
+        botType: Deno.env.get('BOT_TYPE'),
+        logLevel: Deno.env.get('LOG_LEVEL')
       }
     };
 
-    await this.telemetry.logStructured(
-      LogLevel.DEBUG,
-      'ApiGateway',
-      'request-debug',
-      `Debug details for request ${request.id}`,
-      debugData
-    );
+    await this.telemetry.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'ApiGateway',
+      phase: 'request-debug',
+      message: `Debug details for request ${request.id}`,
+      metadata: debugData
+    });
   }
 
   /**
@@ -173,13 +173,13 @@ export class LoggingMiddleware implements Middleware {
       }
     };
 
-    await this.telemetry.logStructured(
-      LogLevel.INFO,
-      'ApiGateway',
-      'security-audit',
-      `Security audit for request ${request.id}`,
-      securityData
-    );
+    await this.telemetry.logStructured({
+      level: LogLevel.INFO,
+      component: 'ApiGateway',
+      phase: 'security-audit',
+      message: `Security audit for request ${request.id}`,
+      metadata: securityData
+    });
   }
 
   /**
@@ -203,13 +203,13 @@ export class LoggingMiddleware implements Middleware {
       }
     };
 
-    await this.telemetry.logStructured(
-      LogLevel.DEBUG,
-      'ApiGateway',
-      'performance-metrics',
-      `Performance metrics for request ${request.id}`,
-      performanceData
-    );
+    await this.telemetry.logStructured({
+      level: LogLevel.DEBUG,
+      component: 'ApiGateway',
+      phase: 'performance-metrics',
+      message: `Performance metrics for request ${request.id}`,
+      metadata: performanceData
+    });
   }
 
   /**
@@ -287,13 +287,13 @@ export class LoggingMiddleware implements Middleware {
       ? `Request ${requestId} completed successfully`
       : `Request ${requestId} failed`;
 
-    await this.telemetry.logStructured(
+    await this.telemetry.logStructured({
       level,
-      'ApiGateway',
-      'request-completed',
+      component: 'ApiGateway',
+      phase: 'request-completed',
       message,
-      responseData
-    );
+      metadata: responseData
+    });
   }
 
   /**

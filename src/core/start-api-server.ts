@@ -9,6 +9,8 @@ import { CoreApiServer, createDefaultCoreApiServerConfig } from './api-server.ts
 import { MessageRouter, createDefaultMessageRouterConfig } from './message-router.ts';
 import { SessionManager, createDefaultSessionManagerConfig } from './session-manager.ts';
 import { createSystemOrchestrator } from './component-factory.ts';
+import { ApiGateway, createDefaultGatewayConfig } from './api-gateway.ts';
+import { initializeTelemetry } from '../services/telemetry/index.ts';
 
 // Import event-based logging system
 import { initializeLogging } from '../utils/event-log-manager.ts';
@@ -28,6 +30,10 @@ async function startApiServer(): Promise<void> {
   console.log('[StartupScript] Starting Core API Server with Real SystemOrchestrator...');
 
   try {
+    // Initialize telemetry service
+    console.log('[StartupScript] Initializing telemetry service...');
+    const telemetry = await initializeTelemetry();
+
     // Create real SystemOrchestrator with all components
     console.log('[StartupScript] Creating Real SystemOrchestrator...');
     const systemOrchestrator = await createSystemOrchestrator();
@@ -42,6 +48,12 @@ async function startApiServer(): Promise<void> {
     const sessionManagerConfig = createDefaultSessionManagerConfig();
     const sessionManager = new SessionManager(sessionManagerConfig);
     await sessionManager.initialize();
+
+    // Create API Gateway
+    console.log('[StartupScript] Creating API Gateway...');
+    const apiGatewayConfig = createDefaultGatewayConfig();
+    const gateway = new ApiGateway(apiGatewayConfig, telemetry);
+    await gateway.initialize();
 
     // Create CoreApiServer configuration
     console.log('[StartupScript] Creating CoreApiServer...');
@@ -72,7 +84,7 @@ async function startApiServer(): Promise<void> {
     console.log(`[StartupScript] API Server will listen on ${apiServerConfig.host}:${apiServerConfig.port}`);
 
     // Create and start the API server
-    const apiServer = new CoreApiServer(apiServerConfig, messageRouter, sessionManager);
+    const apiServer = new CoreApiServer(apiServerConfig, messageRouter, sessionManager, gateway);
 
     console.log('[StartupScript] Starting API Server...');
     await apiServer.start();

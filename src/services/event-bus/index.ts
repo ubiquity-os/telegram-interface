@@ -28,6 +28,7 @@ export type {
   ModerationModifiedEvent,
   ModerationFailedEvent,
   ModerationCompleteEvent,
+  ErrorRecoveredEvent,
   ErrorOccurredEvent,
   ComponentInitializedEvent,
   ComponentShutdownEvent,

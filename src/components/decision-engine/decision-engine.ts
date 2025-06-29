@@ -10,10 +10,10 @@ import {
   DecisionEngineConfig,
   ToolExecutionContext,
   DecisionMetrics,
-  ProcessingPhase
+  ProcessingPhase,
 } from './types.ts';
 import { StatePersistence, DenoKvStatePersistence, MemoryStatePersistence } from './state-persistence.ts';
-import { ErrorRecoveryService } from '../../services/error-recovery-service.ts';
+import { ErrorRecoveryService, createErrorRecoveryService, RetryStrategy } from '../../services/error-recovery-service.ts';
 
 import type {
   IDecisionEngine,
@@ -23,7 +23,7 @@ import type {
   DecisionContext,
   Decision,
   ToolCall,
-  ToolResult
+  ToolResult,
 } from '../../interfaces/component-interfaces.ts';
 
 // Import DecisionState as runtime value (not type-only)
@@ -33,7 +33,7 @@ import {
   TelegramMessage,
   MessageAnalysis,
   SystemEvent,
-  EventType
+  EventType,
 } from '../../interfaces/message-types.ts';
 
 import { createEventEmitter, SystemEventType } from '../../services/event-bus/index.ts';
@@ -60,18 +60,18 @@ export class DecisionEngine implements IDecisionEngine {
   constructor(
     @inject(TYPES.ContextManager) contextManager: IContextManager,
     @inject(TYPES.ErrorHandler) errorHandler: IErrorHandler,
-    config?: Partial<DecisionEngineConfig>
+    config?: Partial<DecisionEngineConfig>,
   ) {
     this.contextManager = contextManager;
     this.errorHandler = errorHandler;
-    this.errorRecoveryService = new ErrorRecoveryService();
+    this.errorRecoveryService = createErrorRecoveryService();
     this.config = {
       maxStateRetention: 1000,
       defaultTimeout: 30000,
       enableStatePersistence: true,
       debugMode: false,
       confidenceThreshold: 0.6,
-      ...config
+      ...config,
     };
 
     this.stateMachine = new DecisionStateMachine();
@@ -80,7 +80,7 @@ export class DecisionEngine implements IDecisionEngine {
       averageDecisionTime: 0,
       toolUsageRate: 0,
       errorRate: 0,
-      stateDistribution: {} as Record<DecisionState, number>
+      stateDistribution: {} as Record<DecisionState, number>,
     };
     this.eventEmitter = createEventEmitter('DecisionEngine');
   }
@@ -120,8 +120,8 @@ export class DecisionEngine implements IDecisionEngine {
       type: SystemEventType.COMPONENT_INITIALIZED,
       payload: {
         componentName: this.name,
-        timestamp: new Date()
-      }
+        timestamp: new Date(),
+      },
     });
 
     if (this.config.debugMode) {
@@ -163,8 +163,8 @@ export class DecisionEngine implements IDecisionEngine {
         activeChats,
         stateDistribution,
         phaseDistribution,
-        metrics: this.metrics
-      }
+        metrics: this.metrics,
+      },
     };
   }
 
@@ -182,15 +182,9 @@ export class DecisionEngine implements IDecisionEngine {
     // Use telemetry wrapper if available
     if (this.telemetry) {
       return await this.telemetry.withTrace(
-        'DecisionEngine.makeDecision',
+        'DecisionEngine',
+        'makeDecision',
         async () => await this.makeDecisionWithTelemetry(context),
-        {
-          component: 'DecisionEngine',
-          chatId: context.message.chatId.toString(),
-          messageId: context.message.messageId?.toString(),
-          intent: context.analysis.intent,
-          confidence: context.analysis.confidence
-        }
       );
     }
 
@@ -216,8 +210,8 @@ export class DecisionEngine implements IDecisionEngine {
           messageId: context.message.messageId?.toString(),
           intent: context.analysis.intent,
           confidence: context.analysis.confidence,
-          currentState: this.stateMachine.getCurrentState(chatId)
-        }
+          currentState: this.stateMachine.getCurrentState(chatId),
+        },
       });
 
       console.log(`[DecisionEngine] makeDecision() STARTED - ChatId: ${chatId}, Initial state: ${this.stateMachine.getCurrentState(chatId)}`);
@@ -233,7 +227,7 @@ export class DecisionEngine implements IDecisionEngine {
             component: 'DecisionEngine',
             phase: 'state_restoration',
             message: 'Restored persisted state',
-            metadata: { chatId: chatId.toString(), restoredState: persistedState }
+            metadata: { chatId: chatId.toString(), restoredState: persistedState },
           });
           if (this.config.debugMode) {
             console.log(`[DecisionEngine] Restored persisted state for chat ${chatId}`);
@@ -249,7 +243,7 @@ export class DecisionEngine implements IDecisionEngine {
           component: 'DecisionEngine',
           phase: 'state_initialization',
           message: 'Initialized new chat state',
-          metadata: { chatId: chatId.toString() }
+          metadata: { chatId: chatId.toString() },
         });
       }
 
@@ -262,7 +256,7 @@ export class DecisionEngine implements IDecisionEngine {
       // Start processing with analysis phase
       this.stateMachine.startProcessing(chatId, 'analysis', {
         messageId: context.message.messageId,
-        userId: context.message.userId
+        userId: context.message.userId,
       });
 
       this.telemetry?.logStructured({
@@ -273,8 +267,8 @@ export class DecisionEngine implements IDecisionEngine {
         metadata: {
           chatId: chatId.toString(),
           currentState: this.stateMachine.getCurrentState(chatId),
-          currentPhase: this.stateMachine.getCurrentPhase(chatId)
-        }
+          currentPhase: this.stateMachine.getCurrentPhase(chatId),
+        },
       });
 
       // Save state after transition
@@ -287,9 +281,9 @@ export class DecisionEngine implements IDecisionEngine {
       const decision = await this.errorRecoveryService.executeWithRetry(
         async () => await this.analyzeAndDecide(context),
         {
+          strategy: RetryStrategy.EXPONENTIAL_BACKOFF,
           maxAttempts: 3,
-          circuitBreakerKey: 'decision-engine-analysis',
-          onRetry: (error, attempt, delay) => {
+          onRetry: (error: Error, attempt: number, delay: number) => {
             console.log(`[DecisionEngine] Retrying analysis phase (attempt ${attempt}/${3}): ${error.message}`);
             this.telemetry?.logStructured({
               level: LogLevel.WARN,
@@ -300,11 +294,11 @@ export class DecisionEngine implements IDecisionEngine {
                 chatId: chatId.toString(),
                 attempt,
                 maxAttempts: 3,
-                error: error.message
-              }
+                error: error.message,
+              },
             });
-          }
-        }
+          },
+        },
       );
 
       this.telemetry?.logStructured({
@@ -318,8 +312,8 @@ export class DecisionEngine implements IDecisionEngine {
           toolCallsCount: decision.toolCalls?.length ?? 0,
           responseStrategy: decision.responseStrategy?.type,
           currentState: this.stateMachine.getCurrentState(chatId),
-          currentPhase: this.stateMachine.getCurrentPhase(chatId)
-        }
+          currentPhase: this.stateMachine.getCurrentPhase(chatId),
+        },
       });
 
       console.log(`[DecisionEngine] Decision made:`, {
@@ -327,13 +321,13 @@ export class DecisionEngine implements IDecisionEngine {
         toolCallsCount: decision.toolCalls?.length ?? 0,
         responseStrategy: decision.responseStrategy?.type,
         currentState: this.stateMachine.getCurrentState(chatId),
-        currentPhase: this.stateMachine.getCurrentPhase(chatId)
+        currentPhase: this.stateMachine.getCurrentPhase(chatId),
       });
 
       // Complete processing
       this.stateMachine.completeProcessing(chatId, {
         decision: decision.action,
-        hasToolCalls: !!decision.toolCalls?.length
+        hasToolCalls: !!decision.toolCalls?.length,
       });
 
       // Save final state
@@ -355,9 +349,9 @@ export class DecisionEngine implements IDecisionEngine {
         metadata: {
           chatId: chatId.toString(),
           duration,
-          finalState: this.stateMachine.getCurrentState(chatId)
+          finalState: this.stateMachine.getCurrentState(chatId),
         },
-        duration
+        duration,
       });
 
       if (decision.toolCalls && decision.toolCalls.length > 0) {
@@ -370,8 +364,8 @@ export class DecisionEngine implements IDecisionEngine {
         payload: {
           message: context.message,
           decision,
-          requestId: context.message.messageId.toString()
-        }
+          requestId: context.message.messageId.toString(),
+        },
       });
 
       return decision;
@@ -390,16 +384,16 @@ export class DecisionEngine implements IDecisionEngine {
           chatId: chatId.toString(),
           currentState,
           currentPhase: this.stateMachine.getCurrentPhase(chatId),
-          error: error.message
+          error: error.message,
         },
-        error: error as Error
+        error: error as Error,
       });
 
       // Transition to ERROR state
       console.log(`[DecisionEngine] Transitioning to ERROR state due to: ${error.message}`);
       this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
         error: error.message,
-        errorPhase: this.stateMachine.getCurrentPhase(chatId)
+        errorPhase: this.stateMachine.getCurrentPhase(chatId),
       });
 
       // Save state after transition
@@ -414,13 +408,13 @@ export class DecisionEngine implements IDecisionEngine {
         type: SystemEventType.COMPONENT_ERROR,
         payload: {
           componentName: this.name,
-          error: error as Error
+          error: error as Error,
         },
         metadata: {
           operation: 'makeDecision',
           chatId,
-          messageId: context.message.messageId
-        }
+          messageId: context.message.messageId,
+        },
       });
 
       if (this.errorHandler) {
@@ -428,7 +422,7 @@ export class DecisionEngine implements IDecisionEngine {
           operation: 'makeDecision',
           component: this.name,
           chatId,
-          metadata: { context }
+          metadata: { context },
         });
 
         if (errorResult.handled) {
@@ -436,8 +430,8 @@ export class DecisionEngine implements IDecisionEngine {
             action: 'error',
             metadata: {
               error: error.message,
-              userMessage: errorResult.userMessage
-            }
+              userMessage: errorResult.userMessage,
+            },
           };
         }
       }
@@ -482,7 +476,7 @@ export class DecisionEngine implements IDecisionEngine {
       // Start processing with analysis phase
       this.stateMachine.startProcessing(chatId, 'analysis', {
         messageId: context.message.messageId,
-        userId: context.message.userId
+        userId: context.message.userId,
       });
 
       // Save state after transition
@@ -495,25 +489,25 @@ export class DecisionEngine implements IDecisionEngine {
       const decision = await this.errorRecoveryService.executeWithRetry(
         async () => await this.analyzeAndDecide(context),
         {
+          strategy: RetryStrategy.EXPONENTIAL_BACKOFF,
           maxAttempts: 3,
-          circuitBreakerKey: 'decision-engine-analysis',
-          onRetry: (error, attempt, delay) => {
+          onRetry: (error: Error, attempt: number, delay: number) => {
             console.log(`[DecisionEngine] Retrying analysis phase (attempt ${attempt}/${3}): ${error.message}`);
-          }
-        }
+          },
+        },
       );
       console.log(`[DecisionEngine] Decision made:`, {
         action: decision.action,
         toolCallsCount: decision.toolCalls?.length ?? 0,
         responseStrategy: decision.responseStrategy?.type,
         currentState: this.stateMachine.getCurrentState(chatId),
-        currentPhase: this.stateMachine.getCurrentPhase(chatId)
+        currentPhase: this.stateMachine.getCurrentPhase(chatId),
       });
 
       // Complete processing
       this.stateMachine.completeProcessing(chatId, {
         decision: decision.action,
-        hasToolCalls: !!decision.toolCalls?.length
+        hasToolCalls: !!decision.toolCalls?.length,
       });
 
       // Save final state
@@ -537,8 +531,8 @@ export class DecisionEngine implements IDecisionEngine {
         payload: {
           message: context.message,
           decision,
-          requestId: context.message.messageId.toString()
-        }
+          requestId: context.message.messageId.toString(),
+        },
       });
 
       return decision;
@@ -552,7 +546,7 @@ export class DecisionEngine implements IDecisionEngine {
       console.log(`[DecisionEngine] Transitioning to ERROR state due to: ${error.message}`);
       this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
         error: error.message,
-        errorPhase: this.stateMachine.getCurrentPhase(chatId)
+        errorPhase: this.stateMachine.getCurrentPhase(chatId),
       });
 
       // Save state after transition
@@ -567,13 +561,13 @@ export class DecisionEngine implements IDecisionEngine {
         type: SystemEventType.COMPONENT_ERROR,
         payload: {
           componentName: this.name,
-          error: error as Error
+          error: error as Error,
         },
         metadata: {
           operation: 'makeDecision',
           chatId,
-          messageId: context.message.messageId
-        }
+          messageId: context.message.messageId,
+        },
       });
 
       if (this.errorHandler) {
@@ -581,7 +575,7 @@ export class DecisionEngine implements IDecisionEngine {
           operation: 'makeDecision',
           component: this.name,
           chatId,
-          metadata: { context }
+          metadata: { context },
         });
 
         if (errorResult.handled) {
@@ -589,8 +583,8 @@ export class DecisionEngine implements IDecisionEngine {
             action: 'error',
             metadata: {
               error: error.message,
-              userMessage: errorResult.userMessage
-            }
+              userMessage: errorResult.userMessage,
+            },
           };
         }
       }
@@ -637,7 +631,7 @@ export class DecisionEngine implements IDecisionEngine {
       if (this.stateMachine.getCurrentState(chatId) === DecisionState.PROCESSING) {
         this.stateMachine.transitionToPhase(chatId, 'generation', {
           resultCount: results.length,
-          successCount: results.filter(r => r.success).length
+          successCount: results.filter(r => r.success).length,
         });
       }
 
@@ -652,12 +646,12 @@ export class DecisionEngine implements IDecisionEngine {
         responseStrategy: {
           type: 'tool_based',
           tone: 'technical',
-          includeKeyboard: false
+          includeKeyboard: false,
         },
         metadata: {
           toolResults: results,
-          originalAnalysis: originalContext.analysis
-        }
+          originalAnalysis: originalContext.analysis,
+        },
       };
 
       return decision;
@@ -669,7 +663,7 @@ export class DecisionEngine implements IDecisionEngine {
       this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
         error: error.message,
         phase: 'tool_processing',
-        retryable: isRetryable
+        retryable: isRetryable,
       });
 
       // Save state after transition
@@ -690,7 +684,7 @@ export class DecisionEngine implements IDecisionEngine {
     // Transition to error state
     this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
       error: error.message,
-      context: context.message.messageId
+      context: context.message.messageId,
     });
 
     // Save state after transition
@@ -704,7 +698,7 @@ export class DecisionEngine implements IDecisionEngine {
         operation: 'decision_flow',
         component: this.name,
         chatId,
-        metadata: { context }
+        metadata: { context },
       });
 
       return {
@@ -712,8 +706,8 @@ export class DecisionEngine implements IDecisionEngine {
         metadata: {
           error: error.message,
           userMessage: errorResult.userMessage,
-          retry: errorResult.retry
-        }
+          retry: errorResult.retry,
+        },
       };
     }
 
@@ -722,8 +716,8 @@ export class DecisionEngine implements IDecisionEngine {
       action: 'error',
       metadata: {
         error: error.message,
-        userMessage: 'An error occurred while processing your request. Please try again.'
-      }
+        userMessage: 'An error occurred while processing your request. Please try again.',
+      },
     };
   }
 
@@ -754,7 +748,7 @@ export class DecisionEngine implements IDecisionEngine {
   getMetrics(): DecisionMetrics {
     return {
       ...this.metrics,
-      stateDistribution: this.stateMachine.getStateDistribution()
+      stateDistribution: this.stateMachine.getStateDistribution(),
     };
   }
 
@@ -774,7 +768,7 @@ export class DecisionEngine implements IDecisionEngine {
         intent: analysis.intent,
         confidence: analysis.confidence,
         suggestedTools: analysis.suggestedTools,
-        availableTools: availableToolNames
+        availableTools: availableToolNames,
       });
     }
 
@@ -787,7 +781,7 @@ export class DecisionEngine implements IDecisionEngine {
     console.log(`[DecisionEngine] TRANSITIONING TO DECISION PHASE`);
     this.stateMachine.transitionToPhase(chatId, 'decision', {
       intent: analysis.intent,
-      confidence: analysis.confidence
+      confidence: analysis.confidence,
     });
 
     this.telemetry?.logStructured({
@@ -799,8 +793,8 @@ export class DecisionEngine implements IDecisionEngine {
         chatId: chatId.toString(),
         intent: analysis.intent,
         confidence: analysis.confidence,
-        availableTools: availableToolNames
-      }
+        availableTools: availableToolNames,
+      },
     });
 
     // Save state after transition
@@ -841,7 +835,7 @@ export class DecisionEngine implements IDecisionEngine {
   private async handleToolRequestIntent(
     analysis: MessageAnalysis,
     availableTools: string[],
-    chatId: number
+    chatId: number,
   ): Promise<Decision> {
     const suggestedTools = analysis.suggestedTools || [];
     const matchingTools = this.findMatchingTools(suggestedTools, availableTools);
@@ -850,7 +844,7 @@ export class DecisionEngine implements IDecisionEngine {
       // Transition to tool_execution phase
       this.stateMachine.transitionToPhase(chatId, 'tool_execution', {
         toolCount: matchingTools.length,
-        tools: matchingTools
+        tools: matchingTools,
       });
 
       this.telemetry?.logStructured({
@@ -862,8 +856,8 @@ export class DecisionEngine implements IDecisionEngine {
           chatId: chatId.toString(),
           toolCount: matchingTools.length,
           tools: matchingTools,
-          intent: analysis.intent
-        }
+          intent: analysis.intent,
+        },
       });
 
       if (this.statePersistence) {
@@ -876,24 +870,24 @@ export class DecisionEngine implements IDecisionEngine {
           toolId,
           serverId: 'default',
           name: toolId,
-          arguments: {}
+          arguments: {},
         })),
         responseStrategy: {
           type: 'tool_based',
           tone: 'technical',
-          includeKeyboard: false
+          includeKeyboard: false,
         },
         metadata: {
           intent: analysis.intent,
           confidence: analysis.confidence,
           suggestedTools,
-          matchingTools
-        }
+          matchingTools,
+        },
       };
     } else {
       // No matching tools, transition to generation phase for direct response
       this.stateMachine.transitionToPhase(chatId, 'generation', {
-        noMatchingTools: true
+        noMatchingTools: true,
       });
 
       this.telemetry?.logStructured({
@@ -905,8 +899,8 @@ export class DecisionEngine implements IDecisionEngine {
           chatId: chatId.toString(),
           suggestedTools,
           availableTools,
-          intent: analysis.intent
-        }
+          intent: analysis.intent,
+        },
       });
 
       if (this.statePersistence) {
@@ -923,7 +917,7 @@ export class DecisionEngine implements IDecisionEngine {
   private async handleCommandIntent(
     analysis: MessageAnalysis,
     availableTools: string[],
-    chatId: number
+    chatId: number,
   ): Promise<Decision> {
     const suggestedTools = analysis.suggestedTools || [];
     const matchingTools = this.findMatchingTools(suggestedTools, availableTools);
@@ -932,7 +926,7 @@ export class DecisionEngine implements IDecisionEngine {
       // Transition to tool_execution phase
       this.stateMachine.transitionToPhase(chatId, 'tool_execution', {
         commandType: 'tool_command',
-        toolCount: matchingTools.length
+        toolCount: matchingTools.length,
       });
 
       if (this.statePersistence) {
@@ -945,23 +939,23 @@ export class DecisionEngine implements IDecisionEngine {
           toolId,
           serverId: 'default',
           name: toolId,
-          arguments: {}
+          arguments: {},
         })),
         responseStrategy: {
           type: 'tool_based',
           tone: 'formal',
-          includeKeyboard: true
+          includeKeyboard: true,
         },
         metadata: {
           intent: analysis.intent,
           confidence: analysis.confidence,
-          commandType: 'tool_execution'
-        }
+          commandType: 'tool_execution',
+        },
       };
     } else {
       // Direct command response, transition to generation phase
       this.stateMachine.transitionToPhase(chatId, 'generation', {
-        commandType: 'direct_command'
+        commandType: 'direct_command',
       });
 
       if (this.statePersistence) {
@@ -978,7 +972,7 @@ export class DecisionEngine implements IDecisionEngine {
   private async handleQuestionIntent(
     analysis: MessageAnalysis,
     availableTools: string[],
-    chatId: number
+    chatId: number,
   ): Promise<Decision> {
     const suggestedTools = analysis.suggestedTools || [];
     const matchingTools = this.findMatchingTools(suggestedTools, availableTools);
@@ -989,7 +983,7 @@ export class DecisionEngine implements IDecisionEngine {
       this.stateMachine.transitionToPhase(chatId, 'tool_execution', {
         questionType: 'tool_assisted',
         toolRelevance,
-        toolCount: matchingTools.length
+        toolCount: matchingTools.length,
       });
 
       if (this.statePersistence) {
@@ -1002,24 +996,24 @@ export class DecisionEngine implements IDecisionEngine {
           toolId,
           serverId: 'default',
           name: toolId,
-          arguments: {}
+          arguments: {},
         })),
         responseStrategy: {
           type: 'tool_based',
           tone: this.determineTone(analysis),
-          includeKeyboard: false
+          includeKeyboard: false,
         },
         metadata: {
           intent: analysis.intent,
           confidence: analysis.confidence,
           toolRelevance,
-          questionType: 'research'
-        }
+          questionType: 'research',
+        },
       };
     } else {
       // Direct answer, transition to generation phase
       this.stateMachine.transitionToPhase(chatId, 'generation', {
-        questionType: 'direct_answer'
+        questionType: 'direct_answer',
       });
 
       if (this.statePersistence) {
@@ -1036,7 +1030,7 @@ export class DecisionEngine implements IDecisionEngine {
   private async handleConversationIntent(analysis: MessageAnalysis, chatId: number): Promise<Decision> {
     // Transition to generation phase for conversational response
     this.stateMachine.transitionToPhase(chatId, 'generation', {
-      conversationType: 'casual_chat'
+      conversationType: 'casual_chat',
     });
 
     if (this.statePersistence) {
@@ -1055,13 +1049,13 @@ export class DecisionEngine implements IDecisionEngine {
       responseStrategy: {
         type: 'clarification',
         tone: 'casual',
-        includeKeyboard: true
+        includeKeyboard: true,
       },
       metadata: {
         intent: analysis.intent,
         confidence: analysis.confidence,
-        reason: 'low_confidence'
-      }
+        reason: 'low_confidence',
+      },
     };
   }
 
@@ -1070,19 +1064,19 @@ export class DecisionEngine implements IDecisionEngine {
    */
   private createDirectResponseDecision(
     analysis: MessageAnalysis,
-    tone: 'formal' | 'casual' | 'technical'
+    tone: 'formal' | 'casual' | 'technical',
   ): Decision {
     return {
       action: 'respond',
       responseStrategy: {
         type: 'direct',
         tone,
-        includeKeyboard: false
+        includeKeyboard: false,
       },
       metadata: {
         intent: analysis.intent,
-        confidence: analysis.confidence
-      }
+        confidence: analysis.confidence,
+      },
     };
   }
 
@@ -1127,7 +1121,8 @@ export class DecisionEngine implements IDecisionEngine {
       averageDecisionTime: 0,
       toolUsageRate: 0,
       errorRate: 0,
-      stateDistribution: {} as Record<DecisionState, number>
+      stateDistribution: {} as Record<DecisionState, number>,
     };
   }
 }
+

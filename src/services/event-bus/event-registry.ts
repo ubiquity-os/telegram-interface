@@ -114,6 +114,19 @@ export const EVENT_REGISTRY: Record<SystemEventType, EventDefinition> = {
     consumedBy: ['ErrorHandler', 'SystemOrchestrator']
   },
 
+  [SystemEventType.ERROR_RECOVERED]: {
+    type: SystemEventType.ERROR_RECOVERED,
+    name: 'Error Recovered',
+    description: 'Emitted when the system recovers from a transient error',
+    payload: {
+      component: 'string - The component that recovered',
+      error: 'Error - The original error object',
+      requestId: 'string - Request identifier (optional)'
+    },
+    emittedBy: ['ErrorRecoveryService'],
+    consumedBy: ['SystemOrchestrator', 'TelemetryService']
+  },
+
   [SystemEventType.COMPONENT_INITIALIZED]: {
     type: SystemEventType.COMPONENT_INITIALIZED,
     name: 'Component Initialized',
@@ -232,6 +245,34 @@ export const EVENT_REGISTRY: Record<SystemEventType, EventDefinition> = {
     },
     emittedBy: ['SystemOrchestrator'],
     consumedBy: ['*']
+  },
+
+  [SystemEventType.TOOL_CHANGE]: {
+    type: SystemEventType.TOOL_CHANGE,
+    name: 'Tool Change',
+    description: 'Emitted when a tool is added, updated, or removed from the registry',
+    payload: {
+      toolId: 'string - Tool identifier',
+      changeType: 'string - Type of change (added/updated/removed)',
+      tool: 'RegisteredTool - Tool information (optional for removals)',
+      timestamp: 'string - ISO timestamp of the change'
+    },
+    emittedBy: ['ToolDiscoveryService', 'MCPToolManager'],
+    consumedBy: ['SystemOrchestrator', 'DecisionEngine']
+  },
+
+  [SystemEventType.TOOL_AVAILABILITY_CHANGE]: {
+    type: SystemEventType.TOOL_AVAILABILITY_CHANGE,
+    name: 'Tool Availability Change',
+    description: 'Emitted when a tool becomes available or unavailable',
+    payload: {
+      toolId: 'string - Tool identifier',
+      isAvailable: 'string - Tool availability status (true/false)',
+      reason: 'string - Reason for availability change',
+      timestamp: 'string - ISO timestamp of the change'
+    },
+    emittedBy: ['ToolDiscoveryService', 'MCPToolManager'],
+    consumedBy: ['SystemOrchestrator', 'DecisionEngine']
   }
 };
 

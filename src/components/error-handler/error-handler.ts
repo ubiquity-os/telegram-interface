@@ -11,13 +11,10 @@ import {
   CircuitBreakerStatus,
   ErrorCategory,
   CategorizedError,
-  IEventEmitter
+  IEventEmitter,
 } from '../../interfaces/component-interfaces.ts';
-import { errorRecoveryService } from '../../services/error-recovery-service.ts';
-import {
-  EventType,
-  SystemEvent
-} from '../../interfaces/message-types.ts';
+import { createErrorRecoveryService } from '../../services/error-recovery-service.ts';
+import { EventType, SystemEvent } from '../../interfaces/message-types.ts';
 import {
   ErrorHandlerConfig,
   ErrorReport,
@@ -25,7 +22,7 @@ import {
   CircuitBreakerState,
   ErrorMetrics,
   ErrorPattern,
-  ErrorBatch
+  ErrorBatch,
 } from './types.ts';
 
 export class ErrorHandler implements IErrorHandler {
@@ -49,7 +46,7 @@ export class ErrorHandler implements IErrorHandler {
       errorsByComponent: {},
       retrySuccessRate: 0,
       circuitBreakerTrips: 0,
-      averageErrorRate: 0
+      averageErrorRate: 0,
     };
 
     // Initialize error counts for each category
@@ -75,14 +72,14 @@ export class ErrorHandler implements IErrorHandler {
         type: EventType.COMPONENT_READY,
         source: 'ErrorHandler',
         timestamp: new Date(),
-        data: { status: 'initialized' }
+        data: { status: 'initialized' },
       });
     } catch (error) {
       this.emitEvent({
         type: EventType.COMPONENT_ERROR,
         source: 'ErrorHandler',
         timestamp: new Date(),
-        data: { error: error instanceof Error ? error.message : 'Unknown error' }
+        data: { error: error instanceof Error ? error.message : 'Unknown error' },
       });
       throw error;
     }
@@ -109,7 +106,7 @@ export class ErrorHandler implements IErrorHandler {
         retry: false,
         userMessage: this.getUserFriendlyMessage(categorizedError),
         loggedError: true,
-        circuitBreakerTripped: true
+        circuitBreakerTripped: true,
       };
     }
 
@@ -144,8 +141,8 @@ export class ErrorHandler implements IErrorHandler {
         error: categorizedError.message,
         category: categorizedError.category,
         context,
-        reportId: report.id
-      }
+        reportId: report.id,
+      },
     });
 
     return {
@@ -153,13 +150,14 @@ export class ErrorHandler implements IErrorHandler {
       retry: isRetryable,
       userMessage,
       loggedError: true,
-      circuitBreakerTripped: false
+      circuitBreakerTripped: false,
     };
   }
 
   isRetryableError(error: Error): boolean {
     // Delegate to centralized error recovery service
-    return errorRecoveryService.shouldRetry(error, 1);
+    const recoveryService = createErrorRecoveryService();
+    return recoveryService.isRetryableError(error);
   }
 
   getRetryStrategy(error: Error, operation: string): RetryStrategy {
@@ -184,8 +182,8 @@ export class ErrorHandler implements IErrorHandler {
       maxDelay: 10000,
       retryableErrors: [
         ErrorCategory.NETWORK_TIMEOUT,
-        ErrorCategory.TEMPORARY_FAILURE
-      ]
+        ErrorCategory.TEMPORARY_FAILURE,
+      ],
     };
   }
 
@@ -219,7 +217,7 @@ export class ErrorHandler implements IErrorHandler {
       return {
         serviceId,
         state: 'closed',
-        failureCount: 0
+        failureCount: 0,
       };
     }
 
@@ -245,10 +243,10 @@ export class ErrorHandler implements IErrorHandler {
         status: {
           serviceId,
           state: 'closed',
-          failureCount: 0
+          failureCount: 0,
         },
         failureCount: 0,
-        halfOpenCalls: 0
+        halfOpenCalls: 0,
       };
       this.circuitBreakers.set(serviceId, state);
     }
@@ -261,7 +259,7 @@ export class ErrorHandler implements IErrorHandler {
     if (state.failureCount >= this.config.circuitBreaker.failureThreshold) {
       state.status.state = 'open';
       state.status.nextRetryTime = new Date(
-        Date.now() + this.config.circuitBreaker.recoveryTimeout
+        Date.now() + this.config.circuitBreaker.recoveryTimeout,
       );
 
       this.errorMetrics.circuitBreakerTrips++;
@@ -273,8 +271,8 @@ export class ErrorHandler implements IErrorHandler {
         data: {
           serviceId,
           failureCount: state.failureCount,
-          error: error.message
-        }
+          error: error.message,
+        },
       });
     }
   }
@@ -288,8 +286,8 @@ export class ErrorHandler implements IErrorHandler {
         totalErrors: this.errorMetrics.totalErrors,
         circuitBreakers: this.circuitBreakers.size,
         errorPatternsDetected: this.errorPatterns.size,
-        reportQueueSize: this.reportQueue.length
-      }
+        reportQueueSize: this.reportQueue.length,
+      },
     };
   }
 
@@ -342,21 +340,21 @@ export class ErrorHandler implements IErrorHandler {
         name: error.name,
         message: error.message,
         stack: error.stack,
-        category: error.category
+        category: error.category,
       },
       context: {
         operation: context.operation,
         component: context.component,
         userId: context.userId,
         chatId: context.chatId,
-        metadata: context.metadata
+        metadata: context.metadata,
       },
       environment: {
         nodeVersion: globalThis.Deno?.version?.deno || 'unknown',
         platform: globalThis.Deno?.build?.os || 'unknown',
         memory: globalThis.Deno?.memoryUsage?.()?.heapUsed,
-        uptime: Date.now() - (globalThis.performance?.timeOrigin || 0)
-      }
+        uptime: Date.now() - (globalThis.performance?.timeOrigin || 0),
+      },
     };
   }
 
@@ -381,10 +379,10 @@ export class ErrorHandler implements IErrorHandler {
         headers: {
           'Content-Type': 'application/json',
           ...(this.config.reporting.apiKey && {
-            'Authorization': `Bearer ${this.config.reporting.apiKey}`
-          })
+            'Authorization': `Bearer ${this.config.reporting.apiKey}`,
+          }),
         },
-        body: JSON.stringify(report)
+        body: JSON.stringify(report),
       });
 
       if (!response.ok) {
@@ -417,7 +415,7 @@ export class ErrorHandler implements IErrorHandler {
         occurrences: 0,
         firstSeen: new Date(),
         lastSeen: new Date(),
-        category: error.category
+        category: error.category,
       };
       this.errorPatterns.set(patternKey, pattern);
     }
@@ -435,8 +433,8 @@ export class ErrorHandler implements IErrorHandler {
           pattern: patternKey,
           occurrences: pattern.occurrences,
           category: error.category,
-          component: context.component
-        }
+          component: context.component,
+        },
       });
     }
   }
@@ -459,7 +457,7 @@ export class ErrorHandler implements IErrorHandler {
         id: crypto.randomUUID(),
         errors: this.reportQueue.splice(0),
         timestamp: new Date(),
-        batchSize: this.reportQueue.length
+        batchSize: this.reportQueue.length,
       };
 
       try {
@@ -469,10 +467,10 @@ export class ErrorHandler implements IErrorHandler {
             headers: {
               'Content-Type': 'application/json',
               ...(this.config.reporting.apiKey && {
-                'Authorization': `Bearer ${this.config.reporting.apiKey}`
-              })
+                'Authorization': `Bearer ${this.config.reporting.apiKey}`,
+              }),
             },
-            body: JSON.stringify(batch)
+            body: JSON.stringify(batch),
           });
         }
       } catch (error) {

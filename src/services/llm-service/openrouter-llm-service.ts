@@ -9,7 +9,7 @@
 import { injectable } from 'inversify';
 import { CircuitBreaker } from '../../reliability/circuit-breaker.ts';
 import { getCircuitBreakerConfig } from '../../reliability/circuit-breaker-configs.ts';
-import { errorRecoveryService } from '../../services/error-recovery-service.ts';
+import { createErrorRecoveryService, RetryStrategy } from '../../services/error-recovery-service.ts';
 import { TelemetryService, LogLevel } from '../telemetry/index.ts';
 
 export interface LLMMessage {
@@ -68,6 +68,7 @@ export class OpenRouterLlmService {
   private readonly baseURL = 'https://openrouter.ai/api/v1/chat/completions';
   private readonly circuitBreaker: CircuitBreaker<any>;
   private telemetry?: TelemetryService;
+  private readonly errorRecoveryService: ReturnType<typeof createErrorRecoveryService>;
 
   // DeepSeek free models optimized for OpenRouter routing (max 3)
   private readonly defaultModels = [
@@ -92,7 +93,7 @@ export class OpenRouterLlmService {
     }
 
     // Get API key from environment or config
-    this.apiKey = config.apiKey || process.env('OPENROUTER_API_KEY') || '';
+    this.apiKey = config.apiKey || Deno.env.get('OPENROUTER_API_KEY') || '';
 
     if (!this.apiKey) {
       console.error('[OpenRouterLlmService] CRITICAL: No OpenRouter API key found');
@@ -104,6 +105,9 @@ export class OpenRouterLlmService {
       'openrouter-llm-service',
       getCircuitBreakerConfig('llm')
     );
+
+    // Initialize error recovery service
+    this.errorRecoveryService = createErrorRecoveryService();
   }
 
   /**
@@ -143,14 +147,9 @@ export class OpenRouterLlmService {
     // Use telemetry wrapper if available
     if (this.telemetry) {
       return await this.telemetry.withTrace(
-        'OpenRouterLlmService.generateResponse',
+        'OpenRouterLlmService',
+        'generateResponse',
         async () => await this.generateResponseWithTelemetry(messages, options),
-        {
-          component: 'OpenRouterLlmService',
-          messageCount: messages.length,
-          hasSystemMessage: messages.some(m => m.role === 'system'),
-          models: (options.models || this.config.models || []).join(',')
-        }
       );
     }
 
@@ -300,7 +299,7 @@ export class OpenRouterLlmService {
   ): Promise<OpenRouterResponse> {
 
     // Use centralized error recovery service with circuit breaker
-    return await errorRecoveryService.executeWithRetry(async () => {
+    return await this.errorRecoveryService.executeWithRetry(async () => {
       const requestBody: OpenRouterRequest = {
         models: models, // Let OpenRouter handle the routing and fallbacks
         messages: messages,
@@ -376,9 +375,9 @@ export class OpenRouterLlmService {
 
       return data;
     }, {
+      strategy: RetryStrategy.EXPONENTIAL_BACKOFF,
       maxAttempts: 3,
-      circuitBreakerKey: 'openrouter-llm-service',
-      onRetry: (error, attempt, delay) => {
+      onRetry: (error: Error, attempt: number, delay: number) => {
         console.log(`[OpenRouterLlmService] Retry attempt ${attempt} for error: ${error.message} (delay: ${delay}ms)`);
 
         this.telemetry?.logStructured({
@@ -395,7 +394,7 @@ export class OpenRouterLlmService {
           }
         });
       },
-      onFailure: (error, attempts) => {
+      onFailure: (error: Error, attempts: number) => {
         console.error(`[OpenRouterLlmService] Failed after ${attempts} attempts: ${error.message}`);
 
         this.telemetry?.logStructured({

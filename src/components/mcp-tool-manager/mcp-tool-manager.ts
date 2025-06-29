@@ -6,7 +6,7 @@
 
 import { IComponent, ComponentStatus } from '../../interfaces/component-interfaces.ts';
 import { IErrorHandler, ErrorContext } from '../../interfaces/component-interfaces.ts';
-import { errorRecoveryService } from '../../services/error-recovery-service.ts';
+import { createErrorRecoveryService, RetryStrategy } from '../../services/error-recovery-service.ts';
 import { TelemetryService, LogLevel } from '../../services/telemetry/index.ts';
 import {
   IMCPToolManager,
@@ -18,7 +18,7 @@ import {
   MCPRequest,
   MCPToolRequest,
   CircuitBreakerStatus,
-  CircuitBreakerState
+  CircuitBreakerState,
 } from './types.ts';
 import { MCPStdioClient } from './mcp-client.ts';
 import { ToolRegistry } from './tool-registry.ts';
@@ -46,7 +46,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       idleTimeout: 300000, // 5 minutes
       connectionTimeout: 30000, // 30 seconds
       healthCheckInterval: 60000, // 1 minute
-      maxRetries: 3
+      maxRetries: 3,
     });
   }
 
@@ -81,9 +81,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
             minConnections: 1,
             maxConnections: 3,
             idleTimeout: 300000,
-            connectionTimeout: 30000
-          }
-        }
+            connectionTimeout: 30000,
+          },
+        },
       });
 
       console.log('[MCPToolManager] Initialized successfully');
@@ -94,7 +94,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         phase: 'initialization_error',
         message: 'Failed to initialize MCP Tool Manager',
         metadata: { errorMessage: error.message },
-        error: error as Error
+        error: error as Error,
       });
 
       throw new Error(`Failed to initialize MCPToolManager: ${error.message}`);
@@ -119,8 +119,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         message: 'Starting MCP Tool Manager shutdown',
         metadata: {
           activeClients: this.clientInstances.size,
-          registeredTools: this.toolRegistry.getAllTools().length
-        }
+          registeredTools: this.toolRegistry.getAllTools().length,
+        },
       });
 
       // Shutdown all client instances
@@ -132,7 +132,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
             component: 'MCPToolManager',
             phase: 'client_disconnect',
             message: 'Client disconnected successfully',
-            metadata: { serverId }
+            metadata: { serverId },
           });
         } catch (error) {
           this.telemetry?.logStructured({
@@ -141,7 +141,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
             phase: 'client_disconnect_error',
             message: 'Error disconnecting client',
             metadata: { serverId, errorMessage: error.message },
-            error: error as Error
+            error: error as Error,
           });
         }
       }
@@ -157,7 +157,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         component: 'MCPToolManager',
         phase: 'shutdown_complete',
         message: 'MCP Tool Manager shutdown completed',
-        metadata: {}
+        metadata: {},
       });
 
       console.log('[MCPToolManager] Shutdown complete');
@@ -170,7 +170,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         phase: 'shutdown_error',
         message: 'Error during MCP Tool Manager shutdown',
         metadata: { errorMessage: error.message },
-        error: error as Error
+        error: error as Error,
       });
     }
   }
@@ -179,7 +179,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
    * Get component status (IComponent interface)
    */
   getStatus(): ComponentStatus {
-    const status = {
+    const status: ComponentStatus = {
       name: this.name,
       status: this.isInitialized ? 'healthy' : 'unhealthy',
       lastHealthCheck: this.lastHealthCheck,
@@ -190,10 +190,10 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         circuitBreakerStates: Object.fromEntries(
           Array.from(this.clientInstances.entries()).map(([serverId, client]) => [
             serverId,
-            client.getCircuitBreakerStatus()
-          ])
-        )
-      }
+            client.getCircuitBreakerStatus(),
+          ]),
+        ),
+      },
     };
 
     this.telemetry?.logStructured({
@@ -203,9 +203,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       message: 'Component status checked',
       metadata: {
         status: status.status,
-        serverCount: status.metadata.serverCount,
-        toolCount: status.metadata.toolCount
-      }
+        serverCount: status.metadata?.serverCount,
+        toolCount: status.metadata?.toolCount,
+      },
     });
 
     return status;
@@ -222,13 +222,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
     // Use telemetry wrapper if available
     if (this.telemetry) {
       return await this.telemetry.withTrace(
-        'MCPToolManager.initializeWithConfigs',
+        'MCPToolManager',
+        'initializeWithConfigs',
         async () => await this.initializeWithConfigsWithTelemetry(configs),
-        {
-          component: 'MCPToolManager',
-          serverCount: configs.length,
-          serverNames: configs.map(c => c.name).join(',')
-        }
       );
     }
 
@@ -249,8 +245,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       message: 'Starting server initialization',
       metadata: {
         serverCount: configs.length,
-        servers: configs.map(c => ({ name: c.name, type: c.command ? 'stdio' : 'sse' }))
-      }
+        servers: configs.map(c => ({ name: c.name, type: c.command ? 'stdio' : 'sse' })),
+      },
     });
 
     this.configs = [...configs];
@@ -276,7 +272,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
             serverId: config.name,
             name: tool.name,
             description: tool.description,
-            inputSchema: tool.inputSchema || {}
+            inputSchema: tool.inputSchema || {},
           });
         }
 
@@ -288,8 +284,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           metadata: {
             serverId: config.name,
             toolCount: tools.length,
-            tools: tools.map(t => ({ name: t.name, description: t.description?.substring(0, 100) }))
-          }
+            tools: tools.map(t => ({ name: t.name, description: t.description?.substring(0, 100) })),
+          },
         });
 
         console.log(`[MCPToolManager] Initialized server '${config.name}' with ${tools.length} tools`);
@@ -307,9 +303,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           metadata: {
             serverId: config.name,
             errorMessage: error.message,
-            errorType: error.constructor.name
+            errorType: error.constructor.name,
           },
-          error: error as Error
+          error: error as Error,
         });
 
         // Handle error but don't fail the entire initialization
@@ -317,7 +313,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           await this.errorHandler.handleError(error as Error, {
             component: this.name,
             operation: 'initializeWithConfigs',
-            serverId: config.name
+            serverId: config.name,
           } as ErrorContext);
         }
       }
@@ -332,8 +328,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         totalServers: configs.length,
         successCount,
         errorCount,
-        totalTools: this.toolRegistry.getAllTools().length
-      }
+        totalTools: this.toolRegistry.getAllTools().length,
+      },
     });
 
     console.log('[MCPToolManager] Server initialization complete');
@@ -366,7 +362,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
             serverId: config.name,
             name: tool.name,
             description: tool.description,
-            inputSchema: tool.inputSchema || {}
+            inputSchema: tool.inputSchema || {},
           });
         }
 
@@ -380,7 +376,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           await this.errorHandler.handleError(error as Error, {
             component: this.name,
             operation: 'initializeWithConfigs',
-            serverId: config.name
+            serverId: config.name,
           } as ErrorContext);
         }
       }
@@ -417,9 +413,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           tools.reduce((acc, tool) => {
             acc[tool.serverId] = (acc[tool.serverId] || 0) + 1;
             return acc;
-          }, {} as Record<string, number>)
-        )
-      }
+          }, {} as Record<string, number>),
+        ),
+      },
     });
 
     return tools;
@@ -443,8 +439,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       metadata: {
         toolId,
         found: !!tool,
-        serverId: tool?.serverId
-      }
+        serverId: tool?.serverId,
+      },
     });
 
     return tool;
@@ -467,8 +463,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       message: 'Starting tool registry refresh',
       metadata: {
         currentToolCount: this.toolRegistry.getAllTools().length,
-        activeServers: this.clientInstances.size
-      }
+        activeServers: this.clientInstances.size,
+      },
     });
 
     let refreshedServers = 0;
@@ -488,7 +484,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
               serverId,
               name: tool.name,
               description: tool.description,
-              inputSchema: tool.inputSchema || {}
+              inputSchema: tool.inputSchema || {},
             });
           }
 
@@ -499,8 +495,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
             message: 'Server tools refreshed successfully',
             metadata: {
               serverId,
-              toolCount: tools.length
-            }
+              toolCount: tools.length,
+            },
           });
 
           refreshedServers++;
@@ -516,9 +512,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           message: 'Failed to refresh server tools',
           metadata: {
             serverId,
-            errorMessage: error.message
+            errorMessage: error.message,
           },
-          error: error as Error
+          error: error as Error,
         });
       }
     }
@@ -532,8 +528,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         refreshedServers,
         totalServers: this.clientInstances.size,
         totalToolsRefreshed,
-        finalToolCount: this.toolRegistry.getAllTools().length
-      }
+        finalToolCount: this.toolRegistry.getAllTools().length,
+      },
     });
 
     console.log('[MCPToolManager] Tool registry refresh complete');
@@ -552,14 +548,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
     // Use telemetry wrapper if available
     if (this.telemetry) {
       return await this.telemetry.withTrace(
-        'MCPToolManager.executeTool',
+        'MCPToolManager',
+        'executeTool',
         async () => await this.executeToolWithTelemetry(call),
-        {
-          component: 'MCPToolManager',
-          toolId: call.toolId,
-          serverId: call.serverId,
-          argumentCount: Object.keys(call.arguments || {}).length
-        }
       );
     }
 
@@ -583,9 +574,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         metadata: {
           toolId: call.toolId,
           serverId: call.serverId,
-          availableTools: this.toolRegistry.getAllTools().map(t => t.name)
+          availableTools: this.toolRegistry.getAllTools().map(t => t.name),
         },
-        error
+        error,
       });
 
       throw error;
@@ -602,9 +593,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         metadata: {
           toolId: call.toolId,
           requestedServerId: call.serverId,
-          actualServerId: tool.serverId
+          actualServerId: tool.serverId,
         },
-        error
+        error,
       });
 
       throw error;
@@ -623,9 +614,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         metadata: {
           toolId: call.toolId,
           serverId: call.serverId,
-          circuitBreakerStatus
+          circuitBreakerStatus,
         },
-        error
+        error,
       });
 
       throw error;
@@ -643,8 +634,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         serverId: call.serverId,
         toolName: tool.name,
         argumentKeys: Object.keys(call.arguments || {}),
-        circuitBreakerState: circuitBreakerStatus.state
-      }
+        circuitBreakerState: circuitBreakerStatus.state,
+      },
     });
 
     try {
@@ -655,12 +646,13 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       }
 
       // Execute the tool through the client with error recovery
-      const result = await errorRecoveryService.executeWithRetry(async () => {
+      const recoveryService = createErrorRecoveryService();
+      const result = await recoveryService.executeWithRetry(async () => {
         return await client.callTool(tool.name, call.arguments);
       }, {
+        strategy: RetryStrategy.EXPONENTIAL_BACKOFF,
         maxAttempts: 3,
-        circuitBreakerKey: `mcp-tool-${call.serverId}`,
-        onRetry: (error, attempt, delay) => {
+        onRetry: (error: Error, attempt: number, delay: number) => {
           console.log(`[MCPToolManager] Retry attempt ${attempt} for tool ${call.toolId}: ${error.message} (delay: ${delay}ms)`);
 
           this.telemetry?.logStructured({
@@ -674,11 +666,11 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
               attempt,
               maxAttempts: 3,
               delay,
-              errorMessage: error.message
-            }
+              errorMessage: error.message,
+            },
           });
         },
-        onFailure: (error, attempts) => {
+        onFailure: (error: Error, attempts: number) => {
           console.error(`[MCPToolManager] Tool execution failed after ${attempts} attempts: ${error.message}`);
 
           this.telemetry?.logStructured({
@@ -690,11 +682,11 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
               toolId: call.toolId,
               serverId: call.serverId,
               totalAttempts: attempts,
-              finalError: error.message
+              finalError: error.message,
             },
-            error
+            error,
           });
-        }
+        },
       });
 
       const executionTime = Date.now() - startTime;
@@ -709,9 +701,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           toolId: call.toolId,
           serverId: call.serverId,
           executionTime,
-          resultLength: typeof result === 'string' ? result.length : JSON.stringify(result).length
+          resultLength: typeof result === 'string' ? result.length : JSON.stringify(result).length,
         },
-        duration: executionTime
+        duration: executionTime,
       });
 
       // Update tool usage statistics
@@ -721,7 +713,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         toolId: call.toolId,
         success: true,
         output: result,
-        executionTime
+        executionTime,
       };
     } catch (error) {
       const executionTime = Date.now() - startTime;
@@ -737,17 +729,17 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           serverId: call.serverId,
           executionTime,
           errorMessage: error.message,
-          errorType: error.constructor.name
+          errorType: error.constructor.name,
         },
         duration: executionTime,
-        error: error as Error
+        error: error as Error,
       });
 
       return {
         toolId: call.toolId,
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
-        executionTime
+        executionTime,
       };
     }
   }
@@ -781,17 +773,18 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       }
 
       // Execute the tool through the client with error recovery
-      const result = await errorRecoveryService.executeWithRetry(async () => {
+      const recoveryService = createErrorRecoveryService();
+      const result = await recoveryService.executeWithRetry(async () => {
         return await client.callTool(tool.name, call.arguments);
       }, {
+        strategy: RetryStrategy.EXPONENTIAL_BACKOFF,
         maxAttempts: 3,
-        circuitBreakerKey: `mcp-tool-${call.serverId}`,
-        onRetry: (error, attempt, delay) => {
+        onRetry: (error: Error, attempt: number, delay: number) => {
           console.log(`[MCPToolManager] Retry attempt ${attempt} for tool ${call.toolId}: ${error.message} (delay: ${delay}ms)`);
         },
-        onFailure: (error, attempts) => {
+        onFailure: (error: Error, attempts: number) => {
           console.error(`[MCPToolManager] Tool execution failed after ${attempts} attempts: ${error.message}`);
-        }
+        },
       });
 
       const executionTime = Date.now() - startTime;
@@ -804,7 +797,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         toolId: call.toolId,
         success: true,
         output: result,
-        executionTime
+        executionTime,
       };
     } catch (error) {
       console.error(`[MCPToolManager] Tool execution failed:`, error);
@@ -813,7 +806,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         toolId: call.toolId,
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
-        executionTime: Date.now() - startTime
+        executionTime: Date.now() - startTime,
       };
     }
   }
@@ -836,8 +829,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       metadata: {
         toolCount: calls.length,
         tools: calls.map(c => ({ toolId: c.toolId, serverId: c.serverId })),
-        uniqueServers: [...new Set(calls.map(c => c.serverId))]
-      }
+        uniqueServers: [...new Set(calls.map(c => c.serverId))],
+      },
     });
 
     const startTime = Date.now();
@@ -860,9 +853,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           successCount,
           errorCount,
           executionTime,
-          averageTimePerTool: executionTime / calls.length
+          averageTimePerTool: executionTime / calls.length,
         },
-        duration: executionTime
+        duration: executionTime,
       });
 
       return results;
@@ -877,10 +870,10 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         metadata: {
           toolCount: calls.length,
           executionTime,
-          errorMessage: error.message
+          errorMessage: error.message,
         },
         duration: executionTime,
-        error: error as Error
+        error: error as Error,
       });
 
       throw error;
@@ -911,8 +904,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         serverId,
         status: status.status,
         toolCount: status.toolCount,
-        lastConnected: status.lastConnected?.toISOString()
-      }
+        lastConnected: status.lastConnected?.toISOString(),
+      },
     });
 
     return status;
@@ -944,7 +937,7 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           status: 'error',
           lastConnected: undefined,
           lastError: error instanceof Error ? error.message : 'Unknown error',
-          toolCount: 0
+          toolCount: 0,
         });
       }
     }
@@ -958,8 +951,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         totalServers: this.clientInstances.size,
         healthyCount,
         errorCount,
-        serverBreakdown: statuses.map(s => ({ serverId: s.serverId, status: s.status }))
-      }
+        serverBreakdown: statuses.map(s => ({ serverId: s.serverId, status: s.status })),
+      },
     });
 
     return statuses;
@@ -986,8 +979,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         serverId,
         state: status.state,
         failureCount: status.failureCount,
-        lastFailureTime: status.lastFailureTime?.toISOString()
-      }
+        lastFailureTime: status.lastFailureTime?.toISOString(),
+      },
     });
 
     return status;
@@ -1010,8 +1003,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       message: 'System prompt tools generated',
       metadata: {
         toolCount: this.toolRegistry.getAllTools().length,
-        promptLength: prompt.length
-      }
+        promptLength: prompt.length,
+      },
     });
 
     return prompt;
@@ -1031,8 +1024,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
       phase: 'health_check_start',
       message: 'Starting health check for all servers',
       metadata: {
-        serverCount: this.clientInstances.size
-      }
+        serverCount: this.clientInstances.size,
+      },
     });
 
     const healthResults = new Map<string, boolean>();
@@ -1060,8 +1053,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
             serverId,
             status: status.status,
             isHealthy,
-            toolCount: status.toolCount
-          }
+            toolCount: status.toolCount,
+          },
         });
 
       } catch (error) {
@@ -1076,9 +1069,9 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
           message: 'Server health check failed',
           metadata: {
             serverId,
-            errorMessage: error.message
+            errorMessage: error.message,
           },
-          error: error as Error
+          error: error as Error,
         });
       }
     }
@@ -1094,8 +1087,8 @@ export class MCPToolManager implements IMCPToolManager, IComponent {
         totalServers: this.clientInstances.size,
         healthyCount,
         unhealthyCount,
-        healthCheckTime: this.lastHealthCheck.toISOString()
-      }
+        healthCheckTime: this.lastHealthCheck.toISOString(),
+      },
     });
 
     return healthResults;

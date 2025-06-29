@@ -19,7 +19,7 @@ import { UMPParser, RestApiMessageRequest } from './protocol/ump-parser.ts';
 import { UMPFormatter, ErrorResponseFormat } from './protocol/ump-formatter.ts';
 import { MessageRouter } from './message-router.ts';
 import { SessionManager } from './session-manager.ts';
-import { ApiGateway, GatewayRequest } from './api-gateway.ts';
+import { ApiGateway, GatewayRequest, IncomingRequest } from './api-gateway.ts';
 
 /**
  * Core API Server Configuration
@@ -256,10 +256,10 @@ export class CoreApiServer {
       const body = await req.json() as RestApiMessageRequest;
 
       // Create gateway request for HTTP API
-      const gatewayRequest: GatewayRequest = {
+      const gatewayRequest: IncomingRequest = {
         id: `http_api_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        source: 'http' as const,
-        timestamp: Date.now(),
+        source: 'http',
+        timestamp: new Date(),
         userId: body.userId || 'api_user',
         content: body.message || '',
         metadata: {
@@ -267,8 +267,7 @@ export class CoreApiServer {
           endpoint: 'messages',
           apiVersion: 'v1',
           messageMetadata: body.metadata || {}
-        },
-        originalRequest: req
+        }
       };
 
       // Process through gateway first
@@ -321,7 +320,7 @@ export class CoreApiServer {
         ...formattedResponse,
         gateway: {
           processed: true,
-          metrics: gatewayResponse.metrics,
+          metrics: gatewayResponse.metadata,
           requestId: gatewayRequest.id
         }
       };

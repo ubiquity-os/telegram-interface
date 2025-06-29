@@ -1,0 +1,1 @@
+/// <reference types="https://deno.land/x/deno/types/mod.d.ts" />

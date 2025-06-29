@@ -10,7 +10,7 @@ import { ITelegramInterfaceAdapter } from '../../interfaces/component-interfaces
 import { IDecisionEngine } from '../../interfaces/component-interfaces.ts';
 import { IContextManager } from '../../interfaces/component-interfaces.ts';
 import { IErrorHandler } from '../../interfaces/component-interfaces.ts';
-import { IMCPToolManager } from '../mcp-tool-manager/types.ts';
+import { IMCPToolManager, IToolDiscoveryService } from '../mcp-tool-manager/types.ts';
 import { ISelfModerationEngine } from '../self-moderation-engine/types.ts';
 import { IMessagePreProcessor, IResponseGenerator } from '../../interfaces/component-interfaces.ts';
 import { ComponentStatus } from '../../interfaces/component-interfaces.ts';
@@ -31,6 +31,7 @@ export interface SystemOrchestratorConfig {
   llmServiceConfig?: any;
   mcpToolManagerConfig?: any;
   selfModerationConfig?: any;
+  priority?: number;
 
   // Message queue configuration
   messageQueue?: {
@@ -47,18 +48,23 @@ export interface SystemOrchestratorConfig {
     };
   };
 
+  // Health monitoring
+  healthCheckInterval?: number;
+  componentTimeout?: number;
+
   // Feature flags
-  enableMCPTools: boolean;
-  enableSelfModeration: boolean;
-  enableErrorRecovery: boolean;
+  enableMCPTools?: boolean;
+  enableSelfModeration?: boolean;
+  enableErrorRecovery?: boolean;
 
   // Performance settings
-  requestTimeout: number;
-  maxRetries: number;
+  requestTimeout?: number;
+  maxRetries?: number;
 
   // Logging
-  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  logLevel?: 'debug' | 'info' | 'warn' | 'error';
 }
+
 
 /**
  * Component dependencies for initialization
@@ -71,6 +77,7 @@ export interface ComponentDependencies {
   messagePreProcessor: IMessagePreProcessor;
   responseGenerator: IResponseGenerator;
   mcpToolManager?: IMCPToolManager;
+  toolDiscoveryService?: IToolDiscoveryService;
   selfModerationEngine?: ISelfModerationEngine;
 }
 
@@ -80,7 +87,9 @@ export interface ComponentDependencies {
 export interface SystemHealthStatus {
   overall: 'healthy' | 'degraded' | 'unhealthy';
   components: Map<string, ComponentStatus>;
-  lastHealthCheck: Date;
+  timestamp: Date;
+  systemLoad: number;
+  activeRequests: number;
   uptime: number;
   metrics: SystemMetrics;
 }
@@ -123,6 +132,7 @@ export interface RequestContext {
 export interface ISystemOrchestrator {
   // Lifecycle management
   initialize(config: SystemOrchestratorConfig): Promise<void>;
+  start(): Promise<void>;
   shutdown(): Promise<void>;
   restart(): Promise<void>;
 
@@ -132,14 +142,31 @@ export interface ISystemOrchestrator {
   // Health monitoring
   getHealthStatus(): Promise<SystemHealthStatus>;
   checkComponentHealth(): Promise<Map<string, ComponentStatus>>;
+  checkComponentHealth(componentName: string): Promise<ComponentStatus>;
 
   // Component management
   getComponent<T>(componentName: string): T | undefined;
+  registerComponent(name: string, component: any): void;
   restartComponent(componentName: string): Promise<void>;
+
+  // Configuration and services
+  updateConfiguration(config: Partial<SystemOrchestratorConfig>): void;
+  getEventBus(): any;
+  getTelemetryService(): any;
+  setTelemetry(telemetry: any): void;
 
   // Metrics
   getMetrics(): SystemMetrics;
   resetMetrics(): void;
+
+  // Properties required by interface
+  messageQueue?: any;
+  enableMCPTools: boolean;
+  enableSelfModeration: boolean;
+  enableErrorRecovery: boolean;
+  requestTimeout: number;
+  maxRetries: number;
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
 }
 
 /**

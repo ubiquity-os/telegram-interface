@@ -7,6 +7,9 @@ import { getConfig } from '../utils/config.ts';
 
 // Core Services
 import { LlmService } from '../services/llm-service/index.ts';
+import { ToolDiscoveryService } from '../services/tool-discovery-service.ts';
+import { eventBus, EventBus } from '../services/event-bus/index.ts';
+import { TelemetryService, initializeTelemetry } from '../services/telemetry/index.ts';
 
 // Components
 import { ErrorHandler } from '../components/error-handler/error-handler.ts';
@@ -17,6 +20,8 @@ import { DecisionEngine } from '../components/decision-engine/decision-engine.ts
 import { ResponseGenerator } from '../components/response-generator/response-generator.ts';
 import { TelegramInterfaceAdapter } from '../components/telegram-interface-adapter/telegram-interface-adapter.ts';
 import { SystemOrchestrator } from '../components/system-orchestrator/system-orchestrator.ts';
+import { MCPToolManager } from '../components/mcp-tool-manager/mcp-tool-manager.ts';
+import { ToolRegistry } from '../components/mcp-tool-manager/tool-registry.ts';
 
 // Types
 import type { ComponentDependencies, SystemOrchestratorConfig } from '../components/system-orchestrator/types.ts';
@@ -27,6 +32,7 @@ import type { DecisionEngineConfig } from '../components/decision-engine/types.t
 import type { ResponseGeneratorConfig } from '../components/response-generator/types.ts';
 import type { TelegramInterfaceAdapterConfig } from '../components/telegram-interface-adapter/types.ts';
 import type { LLMConfig } from '../services/llm-service/index.ts';
+import type { ToolDiscoveryConfig } from '../components/mcp-tool-manager/types.ts';
 import { ErrorCategory } from '../interfaces/component-interfaces.ts';
 
 /**
@@ -180,7 +186,7 @@ export async function createMessagePreProcessor(llmService: LlmService): Promise
     isTestMode = true;
   }
 
-  const config: Partial<MessagePreProcessorConfig> = {
+  const config: MessagePreProcessorConfig = {
     maxCacheSize: 100,
     cacheTTL: 3600000, // 1 hour
     temperature: 0.3,
@@ -191,6 +197,40 @@ export async function createMessagePreProcessor(llmService: LlmService): Promise
   const preProcessor = new MessagePreProcessor(llmService, config);
   await preProcessor.initialize();
   return preProcessor;
+}
+
+/**
+ * Create and configure the Tool Registry
+ */
+export function createToolRegistry(telemetryService: TelemetryService): ToolRegistry {
+  const config = {
+    intervalMs: 300000, // 5 minutes
+    enableAutoRefresh: true,
+    healthCheckIntervalMs: 60000, // 1 minute
+    maxHealthCheckHistory: 10,
+    deprecationWarningDays: 30,
+  };
+
+  return new ToolRegistry(config, telemetryService);
+}
+
+/**
+ * Create and configure the MCP Tool Manager
+ */
+export function createMCPToolManager(errorHandler: ErrorHandler): MCPToolManager {
+  return new MCPToolManager(errorHandler);
+}
+
+/**
+ * Create and configure the Tool Discovery Service
+ */
+export function createToolDiscoveryService(
+  mcpToolManager: MCPToolManager,
+  toolRegistry: ToolRegistry,
+  eventBus: EventBus,
+  telemetryService: TelemetryService
+): ToolDiscoveryService {
+  return new ToolDiscoveryService(mcpToolManager, toolRegistry, eventBus, telemetryService);
 }
 
 /**
@@ -285,6 +325,15 @@ export async function createSystemOrchestrator(): Promise<SystemOrchestrator> {
   const errorHandler = createErrorHandler();
   await errorHandler.initialize();
 
+  // Create telemetry service needed by SystemOrchestrator
+  const telemetryService = await initializeTelemetry();
+  // eventBus is already imported as a module
+
+  // Create Phase 4 components - Tool Management System
+  const toolRegistry = createToolRegistry(telemetryService);
+  const mcpToolManager = createMCPToolManager(errorHandler);
+  const toolDiscoveryService = createToolDiscoveryService(mcpToolManager, toolRegistry, eventBus, telemetryService);
+
   const contextManager = await createContextManager();
   const messagePreProcessor = await createMessagePreProcessor(llmService);
   const decisionEngine = await createDecisionEngine(contextManager, errorHandler);
@@ -335,13 +384,17 @@ export async function createSystemOrchestrator(): Promise<SystemOrchestrator> {
 
   // Create and initialize the system orchestrator
   const systemOrchestrator = new SystemOrchestrator(
-    telegramAdapter,
-    messagePreProcessor,
-    decisionEngine,
-    contextManager,
-    responseGenerator,
-    errorHandler
+    telemetryService,
+    eventBus
   );
+
+  // Register other components with the orchestrator
+  systemOrchestrator.registerComponent('TelegramAdapter', telegramAdapter);
+  systemOrchestrator.registerComponent('MessagePreProcessor', messagePreProcessor);
+  systemOrchestrator.registerComponent('DecisionEngine', decisionEngine);
+  systemOrchestrator.registerComponent('ContextManager', contextManager);
+  systemOrchestrator.registerComponent('ResponseGenerator', responseGenerator);
+  systemOrchestrator.registerComponent('ErrorHandler', errorHandler);
 
   // DIAGNOSTIC: Check if decisionEngine is actually set
   console.log('[ComponentFactory] DIAGNOSTIC - SystemOrchestrator created');

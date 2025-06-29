@@ -27,6 +27,10 @@ export interface ToolDefinition {
   description: string;
   inputSchema: any;
   outputSchema?: any;
+  version?: string;
+  lastModified?: Date;
+  healthStatus?: 'healthy' | 'degraded' | 'unhealthy';
+  deprecationNotice?: string;
 }
 
 /**
@@ -112,6 +116,58 @@ export interface ToolRegistryEntry {
   lastUsed?: Date;
   usageCount: number;
   averageExecutionTime?: number;
+  healthCheckHistory?: HealthCheckResult[];
+}
+
+/**
+ * Health check result
+ */
+export interface HealthCheckResult {
+  timestamp: Date;
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  responseTime?: number;
+  error?: string;
+  details?: Record<string, any>;
+}
+
+/**
+ * Tool registry refresh configuration
+ */
+export interface RegistryRefreshConfig {
+  intervalMs: number;
+  enableAutoRefresh: boolean;
+  healthCheckIntervalMs: number;
+  maxHealthCheckHistory: number;
+  deprecationWarningDays: number;
+}
+
+/**
+ * Tool version comparison result
+ */
+export interface VersionComparisonResult {
+  toolId: string;
+  currentVersion?: string;
+  newVersion?: string;
+  isNewer: boolean;
+  isCompatible: boolean;
+  changeType: 'major' | 'minor' | 'patch' | 'unknown';
+}
+
+/**
+ * Registry health status
+ */
+export interface RegistryHealthStatus {
+  overallHealth: 'healthy' | 'degraded' | 'unhealthy';
+  totalTools: number;
+  healthyTools: number;
+  degradedTools: number;
+  unhealthyTools: number;
+  lastHealthCheck: Date;
+  healthTrends: {
+    improving: number;
+    stable: number;
+    degrading: number;
+  };
 }
 
 /**
@@ -151,6 +207,62 @@ export interface IMCPClient {
   sendRequest(request: MCPRequest): Promise<MCPResponse>;
   isConnected(): boolean;
   getStatus(): ServerStatus;
+}
+
+/**
+ * Tool change event
+ */
+export interface ToolChangeEvent {
+  type: 'added' | 'updated' | 'removed' | 'version_changed';
+  toolId: string;
+  serverId: string;
+  oldDefinition?: ToolDefinition;
+  newDefinition?: ToolDefinition;
+  timestamp: Date;
+}
+
+/**
+ * Tool availability event
+ */
+export interface ToolAvailabilityEvent {
+  serverId: string;
+  available: boolean;
+  previousState: boolean;
+  timestamp: Date;
+  error?: string;
+}
+
+/**
+ * Tool discovery configuration
+ */
+export interface ToolDiscoveryConfig {
+  discoveryInterval: number; // milliseconds, default 60000 (1 minute)
+  availabilityCheckInterval: number; // milliseconds, default 30000 (30 seconds)
+  enableRealTimeEvents: boolean; // default true
+  maxRetries: number; // default 3
+  retryDelay: number; // milliseconds, default 5000
+}
+
+/**
+ * Tool Discovery Service interface
+ */
+export interface IToolDiscoveryService {
+  // Discovery operations
+  startPeriodicDiscovery(interval: number): void;
+  stopPeriodicDiscovery(): void;
+  discoverToolsNow(): Promise<ToolChangeEvent[]>;
+
+  // Event system
+  onToolChange(callback: (change: ToolChangeEvent) => void): void;
+  onToolAvailabilityChange(callback: (event: ToolAvailabilityEvent) => void): void;
+
+  // Server discovery
+  discoverNewServers(): Promise<MCPServerConfig[]>;
+  monitorServerAvailability(): Promise<Map<string, boolean>>;
+
+  // Configuration
+  configure(config: ToolDiscoveryConfig): void;
+  getConfiguration(): ToolDiscoveryConfig;
 }
 
 /**
