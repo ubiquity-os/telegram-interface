@@ -48,5 +48,6 @@ export const TYPES = {
   // Utilities
   DeduplicationService: Symbol.for('DeduplicationService'),
   ConversationHistory: Symbol.for('ConversationHistory'),
-  TokenCounter: Symbol.for('TokenCounter')
+  TokenCounter: Symbol.for('TokenCounter'),
+  TelemetryService: Symbol.for('TelemetryService')
 };

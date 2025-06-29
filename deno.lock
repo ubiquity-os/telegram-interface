@@ -187,12 +187,6 @@
     "dependencies": [
       "npm:inversify@^7.5.4",
       "npm:reflect-metadata@^0.2.2"
-    ],
-    "packageJson": {
-      "dependencies": [
-        "npm:inversify@^7.5.4",
-        "npm:reflect-metadata@^0.2.2"
-      ]
-    }
+    ]
   }
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env deno run --allow-net --allow-env --allow-read --allow-write
 
 /**
  * Simple CLI Chat Interface for the Core API Server
@@ -42,56 +42,7 @@ class CLIChat {
     this.sessionId = config.sessionId;
   }
 
-  async initializeGateway(): Promise<void> {
-    console.log('Initializing API Gateway for CLI...');
-
-    // Initialize telemetry service for gateway
-    const telemetryConfig = createDefaultTelemetryConfig();
-    const telemetry = await initializeTelemetry(telemetryConfig);
-
-    // Initialize API Gateway with CLI-optimized configuration
-    const gatewayConfig: ApiGatewayConfig = {
-      rateLimiting: {
-        telegram: {
-          windowMs: 60000,
-          maxRequests: 30,
-          keyGenerator: (req) => `telegram:${req.userId}`,
-          enabled: true
-        },
-        http: {
-          windowMs: 60000,
-          maxRequests: 60,
-          keyGenerator: (req) => `http:${req.userId}`,
-          enabled: true
-        },
-        cli: {
-          windowMs: 60000,
-          maxRequests: 100, // Higher limit for CLI
-          keyGenerator: (req) => `cli:${req.userId}`,
-          enabled: true
-        }
-      },
-      middleware: {
-        enableAuth: false, // Disable auth for CLI
-        enableValidation: true,
-        enableTransformation: true,
-        enableLogging: true
-      },
-      performance: {
-        requestTimeout: 30000,
-        maxConcurrentRequests: 100
-      },
-      debug: {
-        logRequests: true,
-        logResponses: true,
-        logMiddleware: false
-      }
-    };
-
-    this.gateway = new ApiGateway(gatewayConfig, telemetry);
-    await this.gateway.initialize();
-    console.log('Gateway initialized for CLI');
-  }
+  // Removed gateway initialization - CLI connects directly to API server
 
   async createSession(): Promise<boolean> {
     try {
@@ -128,41 +79,13 @@ class CLIChat {
       return { success: false, error: 'No active session' };
     }
 
-    if (!this.gateway) {
-      return { success: false, error: 'Gateway not initialized' };
-    }
-
     try {
-      // Process through gateway first
-      const gatewayRequest: IncomingRequest = {
-        id: `cli_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        source: 'cli' as const,
-        timestamp: new Date(),
-        userId: this.config.userId,
-        content: message,
-        metadata: {
-          sessionId: this.sessionId,
-          interface: 'cli',
-          version: '1.0.0'
-        }
-      };
-
-      const gatewayResponse = await this.gateway.processRequest(gatewayRequest);
-
-      if (!gatewayResponse.success) {
-        return {
-          success: false,
-          error: `Gateway rejected request: ${gatewayResponse.error?.message || 'Unknown error'}`
-        };
-      }
-
-      // Now send to API server with gateway approval
+      // Send directly to API server (which has its own gateway)
       const response = await fetch(`${this.config.apiUrl}/api/v1/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-API-Key': this.config.apiKey,
-          'X-Gateway-Request-Id': gatewayRequest.id,
         },
         body: JSON.stringify({
           message: message,
@@ -179,13 +102,7 @@ class CLIChat {
       }
 
       const data = await response.json();
-
-      // Include gateway metadata in response
-      return {
-        ...data,
-        gatewayProcessed: true,
-        gatewayMetadata: gatewayResponse.metadata
-      };
+      return data;
     } catch (error) {
       return {
         success: false,
@@ -204,22 +121,14 @@ class CLIChat {
   }
 
   async startChat(): Promise<void> {
-    console.log('🤖 UbiquityAI - CLI Chat with API Gateway');
-    console.log('==========================================');
-
-    // Initialize gateway
-    try {
-      await this.initializeGateway();
-    } catch (error) {
-      console.error('❌ Failed to initialize API Gateway:', error.message);
-      Deno.exit(1);
-    }
+    console.log('🤖 UbiquityAI - CLI Chat');
+    console.log('========================');
 
     // Check if server is running
     const isHealthy = await this.checkHealth();
     if (!isHealthy) {
       console.error('❌ API Server is not responding. Please make sure it\'s running on', this.config.apiUrl);
-      console.log('\nTo start the server, run: bun run src/core/api-server.ts');
+      console.log('\nTo start the server, run: deno task api-server:watch');
       Deno.exit(1);
     }
 
@@ -231,7 +140,7 @@ class CLIChat {
     }
 
     console.log('\nType your messages below. Use /quit to exit.');
-    console.log('✅ API Gateway is active - requests will be validated, rate-limited, and logged.\n');
+    console.log('✅ Connected to API Server - messages will be processed through the AI system.\n');
 
     // Start interactive chat loop
     await this.runChatLoop();
@@ -277,9 +186,20 @@ class CLIChat {
   }
 
   private async readInput(promptText: string): Promise<string> {
-    // Use Deno's built-in prompt function for reliable CLI input
-    const input = prompt(promptText);
-    return input || '';
+    // Write prompt to stdout
+    await Deno.stdout.write(new TextEncoder().encode(promptText));
+
+    // Read from stdin
+    const buffer = new Uint8Array(1024);
+    const bytesRead = await Deno.stdin.read(buffer);
+
+    if (bytesRead === null) {
+      return '';
+    }
+
+    // Convert bytes to string and trim whitespace
+    const input = new TextDecoder().decode(buffer.subarray(0, bytesRead)).trim();
+    return input;
   }
 
   private showHelp(): void {

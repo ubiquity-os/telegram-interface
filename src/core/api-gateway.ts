@@ -162,11 +162,19 @@ export class ApiGateway {
   private rateLimitStore = new Map<string, { count: number; resetTime: number }>();
   private activeRequests = new Map<string, { startTime: number; source: string }>();
   private startTime = Date.now();
+  private systemOrchestrator?: any; // Will be set after initialization
 
   constructor(config: ApiGatewayConfig, telemetry: TelemetryService) {
     this.config = config;
     this.telemetry = telemetry;
     this.stats = this.initializeStats();
+  }
+
+  /**
+   * Set the system orchestrator reference to avoid circular imports
+   */
+  setSystemOrchestrator(orchestrator: any): void {
+    this.systemOrchestrator = orchestrator;
   }
 
   /**
@@ -307,7 +315,9 @@ export class ApiGateway {
       }
 
       // All middleware passed - forward to system orchestrator
-      const { systemOrchestrator } = await import('../main.ts');
+      if (!this.systemOrchestrator) {
+        throw new Error('System orchestrator not set. Call setSystemOrchestrator() after initialization.');
+      }
 
       await this.telemetry.info('Forwarding request to system orchestrator', {
         requestId: request.id,
@@ -316,7 +326,7 @@ export class ApiGateway {
 
       // Convert to format expected by system orchestrator
       const orchestratorPayload = this.convertToOrchestratorFormat(currentRequest);
-      const orchestratorResult = await systemOrchestrator.handleUpdate(orchestratorPayload);
+      const orchestratorResult = await this.systemOrchestrator.handleUpdate(orchestratorPayload);
 
       const processingTime = Date.now() - startTime;
       this.updateResponseStats(processingTime, true);

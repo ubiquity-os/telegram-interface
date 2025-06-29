@@ -50,6 +50,7 @@ import { ResponseGeneratorConfig } from '../components/response-generator/types.
 // Import utility services
 import { deduplicationService } from '../services/deduplication.ts';
 import { eventBus } from '../services/event-bus/index.ts';
+import { TelemetryService, createDefaultTelemetryConfig, initializeTelemetry } from '../services/telemetry/index.ts';
 
 /**
  * Create and configure the DI container
@@ -252,10 +253,16 @@ export async function bootstrap(config: {
   // Create container
   const container = createContainer();
 
+  // Initialize and bind TelemetryService BEFORE updating config
+  const telemetryConfig = createDefaultTelemetryConfig();
+  const telemetryService = await initializeTelemetry(telemetryConfig);
+  container.bind<TelemetryService>(TYPES.TelemetryService)
+    .toConstantValue(telemetryService);
+
   // Update with runtime config
   updateContainerConfig(container, config);
 
-  // Get the system orchestrator
+  // Get the system orchestrator AFTER all bindings are complete
   const orchestrator = container.get<ISystemOrchestrator>(TYPES.SystemOrchestrator);
 
   // Initialize the LLM service

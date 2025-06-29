@@ -72,9 +72,9 @@ export class OpenRouterLlmService {
 
   // DeepSeek free models optimized for OpenRouter routing (max 3)
   private readonly defaultModels = [
-    "deepseek/deepseek-r1-0528:free",
+    // "deepseek/deepseek-r1-0528:free",
     "microsoft/mai-ds-r1:free",
-    "deepseek/deepseek-r1:free",
+    // "deepseek/deepseek-r1:free",
   ];
 
   constructor(config: LLMConfig = {}) {

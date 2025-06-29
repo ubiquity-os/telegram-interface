@@ -58,9 +58,9 @@ export async function createLLMService(): Promise<LlmService> {
   const llmConfig: LLMConfig = {
     apiKey: config.openRouterApiKey,
     models: [
-      'deepseek/deepseek-r1-0528:free',
+      // 'deepseek/deepseek-r1-0528:free',
       'microsoft/mai-ds-r1:free',
-      'deepseek/deepseek-r1:free',
+      // 'deepseek/deepseek-r1:free',
     ],
     temperature: 0.7
     // Don't artificially limit free models - let them use their natural token limits

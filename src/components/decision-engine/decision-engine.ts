@@ -6,7 +6,7 @@
 import { injectable, inject } from 'inversify';
 import { TYPES } from '../../core/types.ts';
 import { DecisionStateMachine, DecisionEvent } from './state-machine.ts';
-import {
+import type {
   DecisionEngineConfig,
   ToolExecutionContext,
   DecisionMetrics,
@@ -60,19 +60,12 @@ export class DecisionEngine implements IDecisionEngine {
   constructor(
     @inject(TYPES.ContextManager) contextManager: IContextManager,
     @inject(TYPES.ErrorHandler) errorHandler: IErrorHandler,
-    config?: Partial<DecisionEngineConfig>,
+    @inject(TYPES.DecisionEngineConfig) config: DecisionEngineConfig,
   ) {
     this.contextManager = contextManager;
     this.errorHandler = errorHandler;
     this.errorRecoveryService = createErrorRecoveryService();
-    this.config = {
-      maxStateRetention: 1000,
-      defaultTimeout: 30000,
-      enableStatePersistence: true,
-      debugMode: false,
-      confidenceThreshold: 0.6,
-      ...config,
-    };
+    this.config = config;
 
     this.stateMachine = new DecisionStateMachine();
     this.metrics = {
@@ -1125,4 +1118,3 @@ export class DecisionEngine implements IDecisionEngine {
     };
   }
 }
-

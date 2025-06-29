@@ -3,9 +3,11 @@
  * Extends the base ContextManager with LRU caching capabilities
  */
 
+import { injectable, inject } from 'inversify';
+import { TYPES } from '../../core/types.ts';
 import { ContextManager } from './context-manager.ts';
 import { LRUCache } from '../../services/context-cache/lru-cache.ts';
-import {
+import type {
   IContextManager,
   ComponentStatus,
   ContextStats,
@@ -18,7 +20,7 @@ import {
   EventType,
   SystemEvent
 } from '../../interfaces/message-types.ts';
-import {
+import type {
   ContextManagerConfig,
   IContextStorage
 } from './types.ts';
@@ -48,6 +50,7 @@ interface CacheConfig {
   enableMetrics: boolean;
 }
 
+@injectable()
 export class CachedContextManager extends ContextManager {
   private contextCache: LRUCache<number, ConversationContext>;
   private preferencesCache: LRUCache<number, UserPreferences>;
@@ -56,9 +59,9 @@ export class CachedContextManager extends ContextManager {
   private warmupSet: Set<number> = new Set();
 
   constructor(
-    config: CachedContextManagerConfig,
-    storage: IContextStorage,
-    eventEmitter?: IEventEmitter
+    @inject(TYPES.ContextManagerConfig) config: CachedContextManagerConfig,
+    @inject(TYPES.ContextStorage) storage: IContextStorage,
+    @inject(TYPES.EventBus) eventEmitter?: IEventEmitter
   ) {
     super(config, storage, eventEmitter);
 

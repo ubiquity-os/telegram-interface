@@ -1,4 +1,5 @@
-// Bun automatically imports .env files, no dotenv needed
+// Load environment variables for Deno
+import "https://deno.land/std@0.213.0/dotenv/load.ts";
 import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
 import { eventBus, SystemEventType } from "./services/event-bus/index.ts";
@@ -93,6 +94,9 @@ const { container, orchestrator } = await bootstrap({
   webhookSecret: config.webhookSecret,
 });
 
+// Set the orchestrator in the gateway to avoid circular imports
+gateway.setSystemOrchestrator(orchestrator);
+
 // Get telegram adapter for test mode functionality
 const telegramAdapter = container.get<ITelegramInterfaceAdapter>(TYPES.TelegramInterfaceAdapter);
 
@@ -116,7 +120,7 @@ eventBus.on(SystemEventType.SYSTEM_READY, (event) => {
 });
 
 Deno.serve({
-  port: 8000,
+  port: 8002,
   onListen: ({ hostname, port }) => {
     console.log(`Webhook server running at http://${hostname}:${port}`);
     console.log(`Webhook path: /webhook/${config.webhookSecret}`);
@@ -180,9 +184,10 @@ Deno.serve({
         source: 'http' as const,
         timestamp: new Date(),
         userId: body.userId,
+        chatId: body.chatId,
+        sessionId: body.sessionId || 'test-session-default',
         content: body.text,
         metadata: {
-          chatId: body.chatId,
           endpoint: 'test',
           testMode: true,
         },

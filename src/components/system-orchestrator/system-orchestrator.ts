@@ -74,8 +74,8 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   public logLevel: "debug" | "info" | "warn" | "error" = "info";
 
   constructor(
-    @inject('TelemetryService') private telemetryService: TelemetryService,
-    @inject('EventBus') private eventBus: EventBus
+    @inject(TYPES.TelemetryService) private telemetryService: TelemetryService,
+    @inject(TYPES.EventBus) private eventBus: EventBus
   ) {
     this.startTime = new Date();
     this.metrics = this.initializeMetrics();
@@ -359,9 +359,131 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   // Additional helper methods
 
   private async processUpdateWithTelemetry(update: TelegramUpdate, requestId: string): Promise<string> {
-    // Implementation would handle the full message processing pipeline
-    // For now, return a placeholder
-    return 'processed';
+    console.log(`[SystemOrchestrator] Processing update: ${JSON.stringify(update, null, 2)}`);
+
+    try {
+      // Get components
+      const messagePreProcessor = this.getComponent<IMessagePreProcessor>('MessagePreProcessor');
+      const contextManager = this.getComponent<IContextManager>('ContextManager');
+      const decisionEngine = this.getComponent<IDecisionEngine>('DecisionEngine');
+      const responseGenerator = this.getComponent<IResponseGenerator>('ResponseGenerator');
+      const telegramAdapter = this.getComponent<ITelegramInterfaceAdapter>('TelegramAdapter');
+
+      if (!messagePreProcessor || !contextManager || !decisionEngine || !responseGenerator || !telegramAdapter) {
+        throw new Error('Required components not available');
+      }
+
+      // Extract message content
+      const messageText = update.message?.text || '';
+      const userId = update.message?.from?.id?.toString() || 'unknown';
+      const chatId = update.message?.chat?.id?.toString() || 'unknown';
+
+      console.log(`[SystemOrchestrator] Processing message: "${messageText}" from user ${userId} in chat ${chatId}`);
+
+      // 1. Get conversation context
+      const conversationContext = await contextManager.getContext(parseInt(chatId));
+      console.log(`[SystemOrchestrator] Got conversation context with ${conversationContext.messages?.length || 0} messages`);
+
+      // 2. Analyze message
+      const analysis = await messagePreProcessor.analyzeMessage(messageText, conversationContext);
+      console.log(`[SystemOrchestrator] Message analysis:`, JSON.stringify(analysis, null, 2));
+
+      // 3. Make decision
+      const telegramMessage: TelegramMessage = {
+        chatId: parseInt(chatId),
+        userId: parseInt(userId),
+        messageId: update.message?.message_id || Date.now(),
+        text: messageText,
+        timestamp: new Date(update.message?.date ? update.message.date * 1000 : Date.now())
+      };
+
+      const decisionContext: DecisionContext = {
+        message: telegramMessage,
+        analysis,
+        conversationState: conversationContext,
+        availableTools: []
+      };
+
+      const decision = await decisionEngine.makeDecision(decisionContext);
+      console.log(`[SystemOrchestrator] Decision made:`, JSON.stringify(decision, null, 2));
+
+      // 4. Generate response
+      const responseContext: ResponseContext = {
+        originalMessage: messageText,
+        analysis,
+        conversationHistory: conversationContext.messages || [],
+        toolResults: [],
+        constraints: {
+          maxLength: 4000,
+          allowMarkdown: true,
+          requireInlineKeyboard: false,
+          tone: 'casual'
+        }
+      };
+
+      const generatedResponse = await responseGenerator.generateResponse(responseContext);
+      console.log(`[SystemOrchestrator] Generated response:`, JSON.stringify(generatedResponse, null, 2));
+
+      // 5. Save message to context
+      const userMessage: InternalMessage = {
+        id: `msg_${Date.now()}_user`,
+        chatId: parseInt(chatId),
+        userId: parseInt(userId),
+        content: messageText,
+        timestamp: new Date(),
+        metadata: {
+          source: 'telegram',
+          originalMessageId: update.message?.message_id
+        }
+      };
+
+      const systemMessage: InternalMessage = {
+        id: `msg_${Date.now()}_system`,
+        chatId: parseInt(chatId),
+        userId: parseInt(userId),
+        content: generatedResponse.content,
+        timestamp: new Date(),
+        metadata: {
+          source: 'system',
+          requestId: requestId
+        }
+      };
+
+      await contextManager.addMessage(userMessage);
+      await contextManager.addMessage(systemMessage);
+
+      // 6. Send via Telegram adapter (if not in test mode)
+      const telegramResponse: TelegramResponse = {
+        chatId: parseInt(chatId),
+        text: generatedResponse.content,
+        replyToMessageId: update.message?.message_id
+      };
+
+      await telegramAdapter.sendResponse(telegramResponse);
+
+      console.log(`[SystemOrchestrator] Successfully processed message, returning: "${generatedResponse.content}"`);
+      return generatedResponse.content;
+
+    } catch (error) {
+      console.error(`[SystemOrchestrator] Error in processUpdateWithTelemetry:`, error);
+      const errorMessage = `Sorry, I encountered an error: ${error.message}`;
+
+      // Try to send error response via Telegram adapter
+      try {
+        const telegramAdapter = this.getComponent<ITelegramInterfaceAdapter>('TelegramAdapter');
+        if (telegramAdapter && update.message?.chat?.id) {
+          const errorResponse: TelegramResponse = {
+            chatId: update.message.chat.id,
+            text: errorMessage
+          };
+          await telegramAdapter.sendResponse(errorResponse);
+        }
+      } catch (sendError) {
+        console.error(`[SystemOrchestrator] Failed to send error message:`, sendError);
+      }
+
+      return errorMessage;
+    }
   }
 
   private initializeMetrics(): SystemMetrics {

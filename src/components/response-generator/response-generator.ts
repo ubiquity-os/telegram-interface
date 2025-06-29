@@ -5,6 +5,8 @@
  * and tool results, formatted for Telegram
  */
 
+import { injectable, inject } from 'inversify';
+import { TYPES } from '../../core/types.ts';
 import {
   IResponseGenerator,
   IComponent,
@@ -23,7 +25,7 @@ import {
 import { LlmService } from '../../services/llm-service/index.ts';
 import { OpenRouterMessage } from '../../services/openrouter-types.ts';
 
-import {
+import type {
   ResponseGeneratorConfig,
   ResponseStrategy,
   FormattingOptions,
@@ -68,6 +70,7 @@ const DEFAULT_CONFIG: ResponseGeneratorConfig = {
 /**
  * Response Generator component
  */
+@injectable()
 export class ResponseGenerator implements IResponseGenerator, IComponent {
   public readonly name = 'ResponseGenerator';
   private config: ResponseGeneratorConfig;
@@ -76,8 +79,8 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
   private eventEmitter = createEventEmitter('ResponseGenerator');
 
   constructor(
-    llmService: LlmService,
-    config: Partial<ResponseGeneratorConfig> = {}
+    @inject(TYPES.LLMService) llmService: LlmService,
+    @inject(TYPES.ResponseGeneratorConfig) config: ResponseGeneratorConfig
   ) {
     this.llmService = llmService;
     this.config = { ...DEFAULT_CONFIG, ...config };

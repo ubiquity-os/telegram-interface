@@ -55,6 +55,9 @@ async function startApiServer(): Promise<void> {
     const gateway = new ApiGateway(apiGatewayConfig, telemetry);
     await gateway.initialize();
 
+    // Set the system orchestrator in the gateway to avoid circular imports
+    gateway.setSystemOrchestrator(systemOrchestrator);
+
     // Create CoreApiServer configuration
     console.log('[StartupScript] Creating CoreApiServer...');
     const apiServerConfig = createDefaultCoreApiServerConfig();
