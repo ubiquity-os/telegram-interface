@@ -177,13 +177,23 @@ export class MessageRouter {
    * Convert UniversalMessage to platform-specific format
    */
   private convertToPlatformMessage(universalMessage: UniversalMessage): any {
+    console.log(`[MessageRouter] 🔄 CONVERTING MESSAGE TO PLATFORM FORMAT`);
+    console.log(`[MessageRouter] 🔍 Input platform: ${universalMessage.platform}`);
+    console.log(`[MessageRouter] 🔍 Message ID: ${universalMessage.id}`);
+    console.log(`[MessageRouter] 🔍 User ID: ${universalMessage.userId}`);
+    console.log(`[MessageRouter] 🔍 Chat ID: ${universalMessage.conversation.chatId}`);
+    console.log(`[MessageRouter] 🔍 Content: "${universalMessage.content.text}"`);
+
     switch (universalMessage.platform) {
       case Platform.TELEGRAM:
+        console.log(`[MessageRouter] ✅ ROUTING: Telegram platform - calling convertToTelegramUpdate`);
         return this.convertToTelegramUpdate(universalMessage);
       case Platform.REST_API:
+        console.log(`[MessageRouter] ✅ ROUTING: REST API platform - calling convertToInternalFormat`);
         // For REST API, we'll process it directly through the system
         return this.convertToInternalFormat(universalMessage);
       default:
+        console.error(`[MessageRouter] ❌ UNSUPPORTED PLATFORM: ${universalMessage.platform}`);
         throw new UMPError(
           `Unsupported platform for conversion: ${universalMessage.platform}`,
           UMPErrorType.PLATFORM_NOT_SUPPORTED,
@@ -244,9 +254,13 @@ export class MessageRouter {
    * Convert UniversalMessage to internal format for direct processing
    */
   private convertToInternalFormat(universalMessage: UniversalMessage): any {
+    console.log(`[MessageRouter] 🔄 CONVERTING REST API MESSAGE TO INTERNAL FORMAT`);
+    console.log(`[MessageRouter] 📥 Input universalMessage:`, JSON.stringify(universalMessage, null, 2));
+
     // Create a mock Telegram update for REST API messages
     // This allows us to reuse the existing SystemOrchestrator logic
     const chatIdRaw = universalMessage.conversation.chatId;
+    console.log(`[MessageRouter] 🔍 Raw chat ID: "${chatIdRaw}" (type: ${typeof chatIdRaw})`);
 
     // Handle both numeric (Telegram) and string (REST API) chat IDs
     let chatIdNumeric: number;
@@ -254,29 +268,38 @@ export class MessageRouter {
     if (typeof chatIdRaw === 'string' && !isNaN(Number(chatIdRaw))) {
       // If it's a numeric string, parse it directly
       chatIdNumeric = parseInt(chatIdRaw, 10);
+      console.log(`[MessageRouter] ✅ Numeric string chat ID converted: ${chatIdNumeric}`);
     } else if (typeof chatIdRaw === 'number') {
       // If it's already a number (from Telegram), use it directly
       chatIdNumeric = chatIdRaw;
+      console.log(`[MessageRouter] ✅ Already numeric chat ID: ${chatIdNumeric}`);
     } else {
       // For non-numeric string chat IDs (REST API), create a deterministic numeric representation
       chatIdNumeric = this.stringToNumericId(chatIdRaw);
+      console.log(`[MessageRouter] ✅ String chat ID hashed to numeric: "${chatIdRaw}" → ${chatIdNumeric}`);
     }
 
     // Parse user ID with similar logic
     let userIdNumeric: number;
     const userIdRaw = universalMessage.userId;
+    console.log(`[MessageRouter] 🔍 Raw user ID: "${userIdRaw}" (type: ${typeof userIdRaw})`);
 
     if (typeof userIdRaw === 'string' && !isNaN(Number(userIdRaw))) {
       userIdNumeric = parseInt(userIdRaw, 10);
+      console.log(`[MessageRouter] ✅ Numeric string user ID converted: ${userIdNumeric}`);
     } else {
       // For non-numeric user IDs, create a deterministic numeric representation
       userIdNumeric = this.stringToNumericId(userIdRaw);
+      console.log(`[MessageRouter] ✅ String user ID hashed to numeric: "${userIdRaw}" → ${userIdNumeric}`);
     }
 
-    return {
-      update_id: Date.now(),
+    const currentTime = Date.now();
+    console.log(`[MessageRouter] 🕒 Using timestamp for update_id and message_id: ${currentTime}`);
+
+    const mockTelegramUpdate = {
+      update_id: currentTime,
       message: {
-        message_id: Date.now(),
+        message_id: currentTime,
         date: Math.floor(universalMessage.timestamp.getTime() / 1000),
         chat: {
           id: chatIdNumeric,
@@ -285,11 +308,21 @@ export class MessageRouter {
         from: {
           id: userIdNumeric,
           is_bot: false,
-          first_name: 'API User'
+          first_name: 'API User' // CRITICAL: This is the REST API indicator!
         },
         text: universalMessage.content.text
       }
     };
+
+    console.log(`[MessageRouter] 📤 Generated mock Telegram update (THIS IS WHAT SystemOrchestrator WILL SEE):`);
+    console.log(`[MessageRouter] 📤 `, JSON.stringify(mockTelegramUpdate, null, 2));
+    console.log(`[MessageRouter] 🔑 PLATFORM DETECTION INDICATORS:`);
+    console.log(`[MessageRouter] 🔑 - first_name: "${mockTelegramUpdate.message.from.first_name}" (should be "API User")`);
+    console.log(`[MessageRouter] 🔑 - update_id: ${mockTelegramUpdate.update_id} (timestamp-based)`);
+    console.log(`[MessageRouter] 🔑 - chat.type: "${mockTelegramUpdate.message.chat.type}"`);
+    console.log(`[MessageRouter] 🔑 - is_bot: ${mockTelegramUpdate.message.from.is_bot}`);
+
+    return mockTelegramUpdate;
   }
 
   /**

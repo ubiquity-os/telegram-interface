@@ -356,13 +356,15 @@ export class SystemOrchestrator implements ISystemOrchestrator {
     this.metrics = this.initializeMetrics();
   }
 
-  // Additional helper methods
+  private generateRequestId(): string {
+    return `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  }
 
   private async processUpdateWithTelemetry(update: TelegramUpdate, requestId: string): Promise<string> {
-    console.log(`[SystemOrchestrator] Processing update: ${JSON.stringify(update, null, 2)}`);
+    // Determine if the message is from the REST API
+    const isRestApiMessage = update.message?.from?.first_name === 'API User';
 
     try {
-      // Get components
       const messagePreProcessor = this.getComponent<IMessagePreProcessor>('MessagePreProcessor');
       const contextManager = this.getComponent<IContextManager>('ContextManager');
       const decisionEngine = this.getComponent<IDecisionEngine>('DecisionEngine');
@@ -370,25 +372,16 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       const telegramAdapter = this.getComponent<ITelegramInterfaceAdapter>('TelegramAdapter');
 
       if (!messagePreProcessor || !contextManager || !decisionEngine || !responseGenerator || !telegramAdapter) {
-        throw new Error('Required components not available');
+        throw new Error('A required component is not available for message processing.');
       }
 
-      // Extract message content
       const messageText = update.message?.text || '';
-      const userId = update.message?.from?.id?.toString() || 'unknown';
-      const chatId = update.message?.chat?.id?.toString() || 'unknown';
+      const userId = update.message?.from?.id?.toString() || 'unknown_user';
+      const chatId = update.message?.chat?.id?.toString() || 'unknown_chat';
 
-      console.log(`[SystemOrchestrator] Processing message: "${messageText}" from user ${userId} in chat ${chatId}`);
-
-      // 1. Get conversation context
       const conversationContext = await contextManager.getContext(parseInt(chatId));
-      console.log(`[SystemOrchestrator] Got conversation context with ${conversationContext.messages?.length || 0} messages`);
-
-      // 2. Analyze message
       const analysis = await messagePreProcessor.analyzeMessage(messageText, conversationContext);
-      console.log(`[SystemOrchestrator] Message analysis:`, JSON.stringify(analysis, null, 2));
 
-      // 3. Make decision
       const telegramMessage: TelegramMessage = {
         chatId: parseInt(chatId),
         userId: parseInt(userId),
@@ -405,9 +398,7 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       };
 
       const decision = await decisionEngine.makeDecision(decisionContext);
-      console.log(`[SystemOrchestrator] Decision made:`, JSON.stringify(decision, null, 2));
 
-      // 4. Generate response
       const responseContext: ResponseContext = {
         originalMessage: messageText,
         analysis,
@@ -422,19 +413,14 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       };
 
       const generatedResponse = await responseGenerator.generateResponse(responseContext);
-      console.log(`[SystemOrchestrator] Generated response:`, JSON.stringify(generatedResponse, null, 2));
 
-      // 5. Save message to context
       const userMessage: InternalMessage = {
         id: `msg_${Date.now()}_user`,
         chatId: parseInt(chatId),
         userId: parseInt(userId),
         content: messageText,
         timestamp: new Date(),
-        metadata: {
-          source: 'telegram',
-          originalMessageId: update.message?.message_id
-        }
+        metadata: { source: isRestApiMessage ? 'rest_api' : 'telegram', originalMessageId: update.message?.message_id }
       };
 
       const systemMessage: InternalMessage = {
@@ -443,46 +429,40 @@ export class SystemOrchestrator implements ISystemOrchestrator {
         userId: parseInt(userId),
         content: generatedResponse.content,
         timestamp: new Date(),
-        metadata: {
-          source: 'system',
-          requestId: requestId
-        }
+        metadata: { source: 'system', requestId: requestId }
       };
 
       await contextManager.addMessage(userMessage);
       await contextManager.addMessage(systemMessage);
 
-      // 6. Send via Telegram adapter (if not in test mode)
-      const telegramResponse: TelegramResponse = {
-        chatId: parseInt(chatId),
-        text: generatedResponse.content,
-        replyToMessageId: update.message?.message_id
-      };
-
-      await telegramAdapter.sendResponse(telegramResponse);
-
-      console.log(`[SystemOrchestrator] Successfully processed message, returning: "${generatedResponse.content}"`);
-      return generatedResponse.content;
-
-    } catch (error) {
-      console.error(`[SystemOrchestrator] Error in processUpdateWithTelemetry:`, error);
-      const errorMessage = `Sorry, I encountered an error: ${error.message}`;
-
-      // Try to send error response via Telegram adapter
-      try {
-        const telegramAdapter = this.getComponent<ITelegramInterfaceAdapter>('TelegramAdapter');
-        if (telegramAdapter && update.message?.chat?.id) {
-          const errorResponse: TelegramResponse = {
-            chatId: update.message.chat.id,
-            text: errorMessage
-          };
-          await telegramAdapter.sendResponse(errorResponse);
-        }
-      } catch (sendError) {
-        console.error(`[SystemOrchestrator] Failed to send error message:`, sendError);
+      // Platform-aware response routing
+      if (isRestApiMessage) {
+        // For REST API, return the content directly for the HTTP response.
+        return generatedResponse.content;
+      } else {
+        // For Telegram, send the response via the adapter.
+        const telegramResponse: TelegramResponse = {
+          chatId: parseInt(chatId),
+          text: generatedResponse.content,
+          replyToMessageId: update.message?.message_id
+        };
+        await telegramAdapter.sendResponse(telegramResponse);
+        return JSON.stringify({ success: true, message: "Response sent via Telegram." });
       }
-
-      return errorMessage;
+    } catch (error) {
+       this.telemetryService.logStructured({
+        level: LogLevel.ERROR,
+        component: 'SystemOrchestrator',
+        phase: 'error_handling',
+        message: `Error during message processing: ${(error as Error).message}`,
+        metadata: {
+          error,
+          update,
+          isRestApiMessage
+        }
+       });
+      // Let the error bubble up to the MessageRouter for proper handling.
+      throw error;
     }
   }
 
@@ -525,45 +505,34 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   private determineOverallHealth(components: Map<string, ComponentStatus>): 'healthy' | 'degraded' | 'unhealthy' {
     const statuses = Array.from(components.values()).map(c => c.status);
 
-    if (statuses.every(s => s === 'healthy')) {
-      return 'healthy';
-    } else if (statuses.some(s => s === 'unhealthy')) {
+    if (statuses.some(s => s === 'unhealthy')) {
       return 'unhealthy';
-    } else {
+    }
+    if (statuses.some(s => s === 'degraded')) {
       return 'degraded';
     }
+    return 'healthy';
   }
 
   private async getSystemLoad(): Promise<number> {
-    // Simple system load calculation
-    return this.metrics.activeRequests / 10; // Normalized to 0-1 scale
+    // Placeholder for actual system load calculation (e.g., CPU, memory)
+    return 0.5;
   }
 
-  private generateRequestId(): string {
-    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  getComponentDependencies(componentName: string): string[] {
+    // Placeholder for dependency resolution logic
+    return [];
   }
 
-  // Methods required by the first interface definition
-  getEventBus(): any {
-    return this.eventBus;
-  }
-
-  getTelemetryService(): any {
-    return this.telemetryService;
-  }
-
-  setTelemetry(telemetry: any): void {
-    this.telemetryService = telemetry;
+  getSystemStatus(): any {
+    return {
+      health: this.getHealthStatus(),
+      metrics: this.getMetrics(),
+    };
   }
 
   updateConfiguration(config: Partial<SystemOrchestratorConfig>): void {
     this.config = { ...this.config, ...config };
-    this.telemetryService.logStructured({
-      level: LogLevel.INFO,
-      component: 'SystemOrchestrator',
-      phase: 'configuration',
-      message: 'Configuration updated'
-    });
+    this.eventBus.publish(EventType.CONFIGURATION_UPDATED, { component: 'SystemOrchestrator', config });
   }
-
 }

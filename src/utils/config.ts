@@ -1,7 +1,7 @@
 interface Config {
   botToken: string;
   webhookSecret: string;
-  botType: "production" | "preview";
+  botType: "production" | "preview" | "local";
   logLevel: "debug" | "info" | "error";
   environment: "development" | "production";
   openRouterApiKey: string;
@@ -22,18 +22,37 @@ export interface DebugConfig {
 }
 
 export async function getConfig(): Promise<Config> {
-  // .env file is loaded via std/dotenv/load.ts import in main.ts
+  // Load .env file manually for Deno
+  try {
+    const envFile = await Deno.readTextFile('.env');
+    const envLines = envFile.split('\n');
+    for (const line of envLines) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        const [key, ...valueParts] = trimmed.split('=');
+        if (key && valueParts.length > 0) {
+          const value = valueParts.join('=').replace(/^["']|["']$/g, '');
+          Deno.env.set(key, value);
+        }
+      }
+    }
+  } catch (error) {
+    console.log('No .env file found or error reading it:', error.message);
+  }
+
   // Determine bot type - defaults to production for backward compatibility
-  const botType = (Deno.env.get("BOT_TYPE") || "production") as "production" | "preview";
+  const botType = (Deno.env.get("BOT_TYPE") ?? "local") as "production" | "preview" | "local";
 
   // Get appropriate bot token based on bot type
   let botToken: string;
   if (botType === "preview") {
     botToken = Deno.env.get("PREVIEW_BOT_TOKEN") || "";
     if (!botToken) throw new Error("PREVIEW_BOT_TOKEN is required when BOT_TYPE=preview");
-  } else {
+  } else if (botType === "production") {
     botToken = Deno.env.get("BOT_TOKEN") || "";
     if (!botToken) throw new Error("BOT_TOKEN is required when BOT_TYPE=production");
+  } else {
+    botToken = Deno.env.get("BOT_TOKEN") || "";
   }
 
   // Get webhook secret

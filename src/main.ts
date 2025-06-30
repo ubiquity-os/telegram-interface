@@ -1,5 +1,4 @@
-// Load environment variables for Deno
-import "https://deno.land/std@0.213.0/dotenv/load.ts";
+// Environment variables are loaded automatically by Bun
 import { getConfig } from "./utils/config.ts";
 import { deduplicationService } from "./services/deduplication.ts";
 import { eventBus, SystemEventType } from "./services/event-bus/index.ts";

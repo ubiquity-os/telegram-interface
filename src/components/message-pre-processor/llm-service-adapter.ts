@@ -7,14 +7,18 @@
 
 import { injectable, inject } from 'inversify';
 import type { ILLMService } from './types.ts';
-import { LlmService, LLMMessage } from '../../services/llm-service/index.ts';
+import { OpenRouterLlmService, LLMMessage } from '../../services/llm-service/openrouter-llm-service.ts';
 import { TYPES } from '../../core/types.ts';
 
 @injectable()
 export class LLMServiceAdapter implements ILLMService {
+  private llmService: OpenRouterLlmService;
+
   constructor(
-    @inject(TYPES.LLMService) private llmService: LlmService
-  ) {}
+    @inject(TYPES.LLMService) private llmServiceFactory: () => OpenRouterLlmService
+  ) {
+    this.llmService = this.llmServiceFactory();
+  }
 
   async getAiResponse(params: {
     messages: Array<{

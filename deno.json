@@ -1,36 +1,54 @@
 {
-  "compilerOptions": {
-    "lib": ["deno.ns", "deno.unstable", "dom", "dom.iterable", "es2022"],
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
-  },
   "tasks": {
-    "telegram-bot": "deno run --watch --allow-net --allow-env --allow-read --unstable-kv src/main.ts",
-    "api-server": "deno run --allow-net --allow-env --allow-read --allow-write --unstable-kv src/core/start-api-server.ts",
-    "api-server:watch": "bash scripts/watch-api-server.sh",
-    "cli-chat": "deno run --allow-net --allow-env --allow-read --allow-write src/cli-chat.ts",
-    "cli-chat:watch": "bash scripts/watch-cli-chat.sh",
-    "test": "deno test --allow-net --allow-env",
-    "test:e2e": "deno run --allow-net --allow-env tests/test-e2e-api.ts",
-    "fmt": "deno fmt",
-    "lint": "deno lint"
+    "dev": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv src/main.ts",
+    "api-server": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv src/core/start-api-server.ts",
+    "api-server:watch": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv --watch src/core/start-api-server.ts",
+    "unified": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv src/unified-server.ts",
+    "unified:watch": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv --watch src/unified-server.ts",
+    "start": "deno task unified",
+    "cli-chat": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv src/cli-chat.ts",
+    "cli-chat:watch": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv --watch src/cli-chat.ts",
+    "test": "deno test --allow-net --allow-read --allow-write --allow-env --unstable-kv",
+    "test:e2e": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv tests/test-e2e-api.ts",
+    "set-webhook": "deno run --allow-net --allow-read --allow-env scripts/set-webhook.ts",
+    "check-webhook": "deno run --allow-net --allow-read --allow-env scripts/check-webhook.ts",
+    "test-openrouter": "deno test --allow-net --allow-read --allow-env tests/test-openrouter-llm-service.ts",
+    "test-routing": "deno test --allow-net --allow-read --allow-env tests/test-openrouter-routing.ts"
   },
   "imports": {
-    "grammy": "https://deno.land/x/grammy@v1.21.1/mod.ts",
-    "grammy/types": "https://deno.land/x/grammy@v1.21.1/types.ts",
     "std/": "https://deno.land/std@0.213.0/",
-    "inversify": "npm:inversify@^7.5.4",
-    "reflect-metadata": "npm:reflect-metadata@^0.2.2"
+    "https://deno.land/x/grammy@v1.20.3/": "https://deno.land/x/grammy@v1.20.3/",
+    "@grammyjs/types": "https://deno.land/x/grammy@v1.20.3/types.ts",
+    "@types/node": "npm:@types/node@^20.0.0",
+    "inversify": "npm:inversify@^6.0.2",
+    "reflect-metadata": "npm:reflect-metadata@^0.2.1"
   },
-  "deploy": {
-    "project": "3cd948fc-3688-478e-8394-70a03eb59431",
-    "exclude": [
-      "**.spec.ts",
-      "**/node_modules"
-    ],
-    "include": [
-      "**"
-    ],
-    "entrypoint": "src/main.ts"
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "lib": ["deno.ns", "dom", "es2022"]
+  },
+  "fmt": {
+    "files": {
+      "include": ["src/", "tests/"]
+    },
+    "options": {
+      "useTabs": false,
+      "lineWidth": 120,
+      "indentWidth": 2,
+      "semiColons": true,
+      "singleQuote": false,
+      "proseWrap": "preserve"
+    }
+  },
+  "lint": {
+    "files": {
+      "include": ["src/", "tests/"]
+    }
   }
 }

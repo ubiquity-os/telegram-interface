@@ -65,7 +65,15 @@ class CLIChat {
       }
 
       const data = await response.json();
-      this.sessionId = data.session.id;
+      // Check both response formats for session ID
+      if (data.session?.id) {
+        this.sessionId = data.session.id;
+      } else if (data.id) {
+        this.sessionId = data.id;
+      } else {
+        console.error('❌ Invalid session creation response:', data);
+        return false;
+      }
       console.log(`✅ Session created: ${this.sessionId}`);
       return true;
     } catch (error) {
@@ -127,8 +135,8 @@ class CLIChat {
     // Check if server is running
     const isHealthy = await this.checkHealth();
     if (!isHealthy) {
-      console.error('❌ API Server is not responding. Please make sure it\'s running on', this.config.apiUrl);
-      console.log('\nTo start the server, run: deno task api-server:watch');
+      console.error('❌ Unified Server is not responding. Please make sure it\'s running on', this.config.apiUrl);
+      console.log('\nTo start the unified server, run: deno task start');
       Deno.exit(1);
     }
 
@@ -213,7 +221,7 @@ class CLIChat {
 
 // Configuration
 function getConfig(): ChatConfig {
-  const apiUrl = Deno.env.get('API_URL') || 'http://localhost:8001';
+  const apiUrl = Deno.env.get('API_URL') || 'http://localhost:8000';
   const apiKey = Deno.env.get('API_KEY') || 'default-api-key';
   const userId = Deno.env.get('USER_ID') || `cli-user-${Date.now()}`;
 

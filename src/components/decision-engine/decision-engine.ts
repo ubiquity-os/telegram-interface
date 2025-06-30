@@ -204,15 +204,18 @@ export class DecisionEngine implements IDecisionEngine {
           intent: context.analysis.intent,
           confidence: context.analysis.confidence,
           currentState: this.stateMachine.getCurrentState(chatId),
+          platform: context.platform,
         },
       });
 
-      console.log(`[DecisionEngine] makeDecision() STARTED - ChatId: ${chatId}, Initial state: ${this.stateMachine.getCurrentState(chatId)}`);
+      console.log(`[ROO_DEBUG] [DecisionEngine] makeDecision() STARTED - ChatId: ${chatId}, Platform: ${context.platform}, Initial state: ${this.stateMachine.getCurrentState(chatId)}`);
 
       // Load persisted state if available
       if (this.statePersistence && !this.stateMachine.hasState(chatId)) {
+        console.log(`[ROO_DEBUG] [DecisionEngine] Attempting to load persisted state for ChatId: ${chatId}`);
         const persistedState = await this.statePersistence.loadState(chatId);
         if (persistedState) {
+          console.log(`[ROO_DEBUG] [DecisionEngine] Successfully loaded persisted state for ChatId: ${chatId}`, persistedState);
           // Restore state to state machine
           this.stateMachine.restoreState(chatId, persistedState);
           this.telemetry?.logStructured({
@@ -225,11 +228,14 @@ export class DecisionEngine implements IDecisionEngine {
           if (this.config.debugMode) {
             console.log(`[DecisionEngine] Restored persisted state for chat ${chatId}`);
           }
+        } else {
+          console.log(`[ROO_DEBUG] [DecisionEngine] No persisted state found for ChatId: ${chatId}.`);
         }
       }
 
       // Ensure this chat has an active state
       if (!this.stateMachine.hasState(chatId)) {
+        console.log(`[ROO_DEBUG] [DecisionEngine] No active state for ChatId: ${chatId}. Initializing new state.`);
         this.stateMachine.initializeChatState(chatId);
         this.telemetry?.logStructured({
           level: LogLevel.INFO,
@@ -270,7 +276,7 @@ export class DecisionEngine implements IDecisionEngine {
       }
 
       // Perform analysis and decision making with error recovery
-      console.log(`[DecisionEngine] Starting analysis phase - Current state: ${this.stateMachine.getCurrentState(chatId)}, Phase: ${this.stateMachine.getCurrentPhase(chatId)}`);
+      console.log(`[ROO_DEBUG] [DecisionEngine] Starting analysis phase - Current state: ${this.stateMachine.getCurrentState(chatId)}, Phase: ${this.stateMachine.getCurrentPhase(chatId)}`);
       const decision = await this.errorRecoveryService.executeWithRetry(
         async () => await this.analyzeAndDecide(context),
         {
@@ -309,7 +315,7 @@ export class DecisionEngine implements IDecisionEngine {
         },
       });
 
-      console.log(`[DecisionEngine] Decision made:`, {
+      console.log(`[ROO_DEBUG] [DecisionEngine] Decision made:`, {
         action: decision.action,
         toolCallsCount: decision.toolCalls?.length ?? 0,
         responseStrategy: decision.responseStrategy?.type,
@@ -318,6 +324,7 @@ export class DecisionEngine implements IDecisionEngine {
       });
 
       // Complete processing
+      console.log(`[ROO_DEBUG] [DecisionEngine] Completing processing for ChatId: ${chatId}`);
       this.stateMachine.completeProcessing(chatId, {
         decision: decision.action,
         hasToolCalls: !!decision.toolCalls?.length,
@@ -366,7 +373,7 @@ export class DecisionEngine implements IDecisionEngine {
     } catch (error) {
       // Handle error with simplified state machine
       const currentState = this.stateMachine.getCurrentState(chatId);
-      console.log(`[DecisionEngine] Error occurred in state: ${currentState}, Phase: ${this.stateMachine.getCurrentPhase(chatId)}`);
+      console.error(`[ROO_DEBUG] [DecisionEngine] CRITICAL ERROR occurred in state: ${currentState}, Phase: ${this.stateMachine.getCurrentPhase(chatId)}`, error);
 
       this.telemetry?.logStructured({
         level: LogLevel.ERROR,
@@ -383,7 +390,7 @@ export class DecisionEngine implements IDecisionEngine {
       });
 
       // Transition to ERROR state
-      console.log(`[DecisionEngine] Transitioning to ERROR state due to: ${error.message}`);
+      console.log(`[ROO_DEBUG] [DecisionEngine] Transitioning to ERROR state due to: ${error.message}`);
       this.stateMachine.transition(chatId, DecisionEvent.ERROR_OCCURRED, {
         error: error.message,
         errorPhase: this.stateMachine.getCurrentPhase(chatId),
@@ -397,6 +404,7 @@ export class DecisionEngine implements IDecisionEngine {
       this.metrics.errorRate = this.calculateErrorRate();
 
       // Emit component error event
+      console.log(`[ROO_DEBUG] [DecisionEngine] Emitting COMPONENT_ERROR event.`);
       await this.eventEmitter.emit({
         type: SystemEventType.COMPONENT_ERROR,
         payload: {
@@ -411,14 +419,23 @@ export class DecisionEngine implements IDecisionEngine {
       });
 
       if (this.errorHandler) {
-        const errorResult = await this.errorHandler.handleError(error as Error, {
-          operation: 'makeDecision',
-          component: this.name,
-          chatId,
-          metadata: { context },
-        });
+        const platform = context.platform || Platform.TELEGRAM; // Default to Telegram for safety
+        console.log(`[ROO_DEBUG] [DecisionEngine] Forwarding error to ErrorHandler for platform: ${platform}`);
+        const errorResult = await this.errorHandler.handleError(
+          error as Error,
+          {
+            operation: 'makeDecision',
+            component: this.name,
+            chatId,
+            messageId: context.message.messageId,
+            metadata: { context },
+          },
+          platform
+        );
+        console.log(`[ROO_DEBUG] [DecisionEngine] ErrorHandler result: `, errorResult);
 
         if (errorResult.handled) {
+          console.log(`[ROO_DEBUG] [DecisionEngine] Error was handled by ErrorHandler. Returning error action.`);
           return {
             action: 'error',
             metadata: {
@@ -429,6 +446,7 @@ export class DecisionEngine implements IDecisionEngine {
         }
       }
 
+      console.error(`[ROO_DEBUG] [DecisionEngine] Error was not handled. Rethrowing.`);
       throw error;
     }
   }

@@ -4,7 +4,7 @@
  */
 
 import { injectable, inject } from 'inversify';
-import { Bot } from "grammy";
+import { Bot } from "https://deno.land/x/grammy@v1.20.3/mod.ts";
 import {
   ITelegramInterfaceAdapter,
   TelegramUpdate,

@@ -57,7 +57,7 @@ import {
  * Default configuration
  */
 const DEFAULT_CONFIG: ResponseGeneratorConfig = {
-  defaultModel: 'deepseek/deepseek-r1:free',
+  defaultModel: 'microsoft/mai-ds-r1:free',
   temperature: 0.7,
   // Don't artificially limit free models - let them use their natural token limits
   maxResponseLength: 4096,
@@ -351,8 +351,11 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
     ];
 
     try {
-      const response = await this.llmService.getAiResponse({ messages });
-      return response;
+      const response = await this.llmService.generateResponse(messages, {
+        models: [this.config.defaultModel],
+        temperature: this.config.temperature
+      });
+      return response.content;
     } catch (error) {
       // Fallback to template-based response
       const template = this.config.responseTemplates?.toolSuccess ||
@@ -459,21 +462,10 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
     console.log(`[ResponseGenerator] Built messages for LLM:`, JSON.stringify(messages, null, 2));
 
     try {
-      console.log(`[ResponseGenerator] About to call llmService.getAiResponse()`);
       const response = await this.llmService.getAiResponse({ messages });
-      console.log(`[ResponseGenerator] LLM service returned: "${response}"`);
-      console.log(`[ResponseGenerator] Response length: ${response.length} characters`);
       return response;
     } catch (error) {
-      console.error('[ResponseGenerator] ERROR calling LLM:', error);
-      console.error('[ResponseGenerator] Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      });
-
-      // Enhanced fallback logic with conversation context
-      console.log(`[ResponseGenerator] Using context-aware fallback for: "${context.originalMessage}"`);
+      console.error('[ResponseGenerator] LLM service error:', error);
       return this.generateContextAwareFallback(context);
     }
   }

@@ -43,6 +43,7 @@ export const TYPES = {
 
   // Factories
   LLMServiceFactory: Symbol.for('LLMServiceFactory'),
+  MessageInterfaceFactory: Symbol.for('MessageInterfaceFactory'),
   EventEmitterFactory: Symbol.for('EventEmitterFactory'),
 
   // Utilities

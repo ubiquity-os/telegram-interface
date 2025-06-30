@@ -277,17 +277,18 @@ export class MessagePreProcessor implements IMessagePreProcessor {
 
     // Call LLM service
     console.log(`[MessagePreProcessor] Calling LLM service...`);
-    const response = await this.llmService.getAiResponse({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ]
+    const response = await this.llmService.generateResponse([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ], {
+      model: this.config.defaultModel,
+      temperature: 0.2
     });
 
-    console.log(`[MessagePreProcessor] LLM service returned: "${response}"`);
+    console.log(`[MessagePreProcessor] LLM service returned: "${response.content}"`);
 
     // Parse and validate response
-    const llmAnalysis = PromptBuilder.parseAnalysisResponse(response);
+    const llmAnalysis = PromptBuilder.parseAnalysisResponse(response.content);
     console.log(`[MessagePreProcessor] Parsed analysis:`, JSON.stringify(llmAnalysis, null, 2));
 
     // Convert to MessageAnalysis format

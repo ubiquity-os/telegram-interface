@@ -22,7 +22,7 @@ export interface MessagePreProcessorConfig {
   /**
    * Model to use for analysis (optional, uses LLM service default if not specified)
    */
-  analysisModel?: string;
+  defaultModel: string;
 
   /**
    * Temperature for analysis (0.0 - 1.0)
@@ -145,10 +145,21 @@ export interface PreProcessorStats {
  * ILLMService interface for dependency injection
  */
 export interface ILLMService {
-  getAiResponse(params: {
+  generateResponse(
     messages: Array<{
       role: 'system' | 'user' | 'assistant';
       content: string;
-    }>;
-  }): Promise<string>;
+    }>,
+    options?: {
+      model?: string;
+      temperature?: number;
+    }
+  ): Promise<{
+    content: string;
+    usage?: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    };
+  }>;
 }
