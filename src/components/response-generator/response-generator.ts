@@ -428,37 +428,21 @@ export class ResponseGenerator implements IResponseGenerator, IComponent {
 
     console.log(`[ResponseGenerator] STARTING buildConversationContext() call`);
 
-    // Build conversation history for context
+    // Build conversation history for context - this should NOT include the current message
     const messages: OpenRouterMessage[] = this.buildConversationContext(context);
 
     console.log(`[ResponseGenerator] RETURNED from buildConversationContext() with ${messages.length} messages`);
 
-    // DIAGNOSTIC: Check if current message is already in the conversation history
-    const currentMessageInHistory = context.conversationHistory.some(msg =>
-      msg.content === context.originalMessage && msg.metadata.source === 'telegram'
-    );
-    console.log(`[ResponseGenerator] DIAGNOSTIC: Current message "${context.originalMessage}" already in conversation history: ${currentMessageInHistory}`);
+    // CRITICAL FIX: Always add the current message as it's the new user input we're responding to
+    // The buildConversationContext should only process existing conversation history
+    console.log(`[ResponseGenerator] Adding current message: "${context.originalMessage}"`);
 
-    // DIAGNOSTIC: Check if buildConversationContext already added current message
-    const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
-    const currentMessageAlreadyAdded = lastUserMessage?.content === context.originalMessage;
-    console.log(`[ResponseGenerator] DIAGNOSTIC: Current message already added by buildConversationContext: ${currentMessageAlreadyAdded}`);
+    messages.push({
+      role: 'user',
+      content: context.originalMessage
+    });
 
-    console.log(`[ResponseGenerator] Current message to add: "${context.originalMessage}"`);
-
-    // Only add the current message if it's not already present
-    if (!currentMessageAlreadyAdded) {
-      messages.push({
-        role: 'user',
-        content: context.originalMessage
-      });
-      console.log(`[ResponseGenerator] Added current message (was not already present)`);
-    } else {
-      console.log(`[ResponseGenerator] Skipped adding current message (already present from conversation history)`);
-    }
-
-    console.log(`[ResponseGenerator] After processing current message: ${messages.length} messages total`);
-
+    console.log(`[ResponseGenerator] After adding current message: ${messages.length} messages total`);
     console.log(`[ResponseGenerator] Built messages for LLM:`, JSON.stringify(messages, null, 2));
 
     try {

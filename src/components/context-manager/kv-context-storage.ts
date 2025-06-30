@@ -16,6 +16,43 @@ import {
   InternalMessage
 } from '../../interfaces/message-types.ts';
 
+/**
+ * In-memory fallback for Deno KV when not available
+ */
+class InMemoryKvFallback {
+  private data = new Map<string, any>();
+
+  async get(key: string[]): Promise<{ value: any }> {
+    const keyStr = JSON.stringify(key);
+    return { value: this.data.get(keyStr) || null };
+  }
+
+  async set(key: string[], value: any): Promise<void> {
+    const keyStr = JSON.stringify(key);
+    this.data.set(keyStr, value);
+  }
+
+  async delete(key: string[]): Promise<void> {
+    const keyStr = JSON.stringify(key);
+    this.data.delete(keyStr);
+  }
+
+  async *list(options: { prefix: string[] }): AsyncIterableIterator<{ key: string[]; value: any }> {
+    const prefixStr = JSON.stringify(options.prefix);
+
+    for (const [keyStr, value] of this.data.entries()) {
+      if (keyStr.startsWith(prefixStr.slice(0, -1))) { // Remove closing bracket
+        const key = JSON.parse(keyStr);
+        yield { key, value };
+      }
+    }
+  }
+
+  close(): void {
+    this.data.clear();
+  }
+}
+
 @injectable()
 export class KVContextStorage implements IContextStorage {
   private kv: Deno.Kv | null = null;
@@ -26,7 +63,16 @@ export class KVContextStorage implements IContextStorage {
   }
 
   async initialize(): Promise<void> {
-    this.kv = await Deno.openKv(this.kvPath);
+    // CRITICAL FIX: Check if Deno.openKv is available (newer Deno versions only)
+    if (typeof (Deno as any).openKv === 'function') {
+      this.kv = await (Deno as any).openKv(this.kvPath);
+      console.log('[KVContextStorage] Initialized with Deno KV');
+    } else {
+      console.warn('[KVContextStorage] Deno.openKv not available, using fallback in-memory storage');
+      // For older Deno versions, we'll use a simple in-memory implementation
+      this.kv = new InMemoryKvFallback() as any;
+      console.log('[KVContextStorage] Initialized with in-memory fallback');
+    }
   }
 
   async getConversation(chatId: number): Promise<ConversationContext | null> {

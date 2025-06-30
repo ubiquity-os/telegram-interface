@@ -5,7 +5,9 @@
  */
 
 import { injectable, inject } from 'inversify';
+import type { interfaces } from 'inversify';
 import { TYPES } from '../../core/types.ts';
+import { Platform } from '../../core/protocol/ump-types.ts';
 import {
   SystemOrchestratorConfig,
   ComponentDependencies,
@@ -75,7 +77,8 @@ export class SystemOrchestrator implements ISystemOrchestrator {
 
   constructor(
     @inject(TYPES.TelemetryService) private telemetryService: TelemetryService,
-    @inject(TYPES.EventBus) private eventBus: EventBus
+    @inject(TYPES.EventBus) private eventBus: EventBus,
+    @inject(TYPES.MessageInterfaceFactory) private messageInterfaceFactory: interfaces.Factory<IMessageInterface>
   ) {
     this.startTime = new Date();
     this.metrics = this.initializeMetrics();
@@ -361,8 +364,19 @@ export class SystemOrchestrator implements ISystemOrchestrator {
   }
 
   private async processUpdateWithTelemetry(update: TelegramUpdate, requestId: string): Promise<string> {
-    // Determine if the message is from the REST API
-    const isRestApiMessage = update.message?.from?.first_name === 'API User';
+    // CRITICAL FIX: Check for gateway metadata or HTTP/CLI user first names
+    const gatewayMeta = (update as any)._gateway;
+    const firstName = update.message?.from?.first_name || '';
+    const isRestApiMessage = gatewayMeta?.source === 'http' ||
+                             gatewayMeta?.source === 'cli' ||
+                             firstName === 'Http User' ||
+                             firstName === 'Cli User' ||
+                             firstName === 'API User';
+
+    console.log(`[SystemOrchestrator] 🔍 PLATFORM DETECTION DEBUG:`);
+    console.log(`[SystemOrchestrator] 🔍 Gateway metadata:`, gatewayMeta);
+    console.log(`[SystemOrchestrator] 🔍 First name: "${firstName}"`);
+    console.log(`[SystemOrchestrator] 🔍 isRestApiMessage: ${isRestApiMessage}`);
 
     try {
       const messagePreProcessor = this.getComponent<IMessagePreProcessor>('MessagePreProcessor');
@@ -435,18 +449,36 @@ export class SystemOrchestrator implements ISystemOrchestrator {
       await contextManager.addMessage(userMessage);
       await contextManager.addMessage(systemMessage);
 
-      // Platform-aware response routing
+      // CRITICAL FIX: Use MessageInterfaceFactory for proper platform routing
+      console.log(`[SystemOrchestrator] 🔄 PLATFORM-AWARE RESPONSE ROUTING`);
+      console.log(`[SystemOrchestrator] 🔍 isRestApiMessage: ${isRestApiMessage}`);
+      console.log(`[SystemOrchestrator] 🔍 Chat ID: ${chatId}, User ID: ${userId}`);
+      console.log(`[SystemOrchestrator] 🔍 Generated response: "${generatedResponse.content}"`);
+
+      // Use the factory to get the correct adapter based on platform
+      const platform = isRestApiMessage ? Platform.REST_API : Platform.TELEGRAM;
+      console.log(`[SystemOrchestrator] 🔍 Selected platform: ${platform}`);
+
+      const messageInterface = this.messageInterfaceFactory(platform);
+      console.log(`[SystemOrchestrator] ✅ ADAPTER SELECTED: ${messageInterface.constructor.name}`);
+
       if (isRestApiMessage) {
-        // For REST API, return the content directly for the HTTP response.
+        // For REST API, return the content directly (ApiResponseAdapter handles this)
+        console.log(`[SystemOrchestrator] 📡 REST API: Returning response content directly`);
         return generatedResponse.content;
       } else {
-        // For Telegram, send the response via the adapter.
+        // For Telegram, send the response via the TelegramInterfaceAdapter
+        console.log(`[SystemOrchestrator] 📱 TELEGRAM: Sending via TelegramInterfaceAdapter`);
         const telegramResponse: TelegramResponse = {
           chatId: parseInt(chatId),
           text: generatedResponse.content,
           replyToMessageId: update.message?.message_id
         };
-        await telegramAdapter.sendResponse(telegramResponse);
+
+        // Use the factory-selected adapter (should be TelegramInterfaceAdapter for Telegram platform)
+        const selectedAdapter = messageInterface as ITelegramInterfaceAdapter;
+        await selectedAdapter.sendResponse(telegramResponse);
+        console.log(`[SystemOrchestrator] ✅ TELEGRAM: Response sent via ${selectedAdapter.constructor.name}`);
         return JSON.stringify({ success: true, message: "Response sent via Telegram." });
       }
     } catch (error) {

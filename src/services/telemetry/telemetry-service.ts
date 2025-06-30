@@ -547,26 +547,60 @@ export class TelemetryService {
    * Rotate log file if needed
    */
   private async rotateLogFileIfNeeded(): Promise<void> {
-    const now = new Date();
-    const dateString = this.config.fileExporter.rotation === 'daily'
-      ? now.toISOString().split('T')[0]  // YYYY-MM-DD
-      : now.toISOString().slice(0, 13);  // YYYY-MM-DDTHH
+    // CRITICAL FIX: Only rotate once at startup, not on every call
+    if (this.currentLogFile && this.logFileHandle) {
+      return; // Already rotated for this session
+    }
 
-    const newLogFile = `${this.config.fileExporter.directory}/traces-${dateString}.jsonl`;
+    // Generate unique session log file name
+    const timestamp = Date.now();
+    const sessionId = Math.random().toString(36).substr(2, 9);
+    const sessionLogFile = `${this.config.fileExporter.directory}/${timestamp}-${sessionId}.log`;
+    const latestLogFile = `${this.config.fileExporter.directory}/latest.log`;
 
-    if (this.currentLogFile !== newLogFile) {
-      // Close current file if open
-      if (this.logFileHandle) {
+    // Close current file if open (should only happen once)
+    if (this.logFileHandle) {
+      try {
         this.logFileHandle.close();
+      } catch (error) {
+        // Ignore if already closed
+      }
+    }
+
+    // Open new session log file
+    this.logFileHandle = await Deno.open(sessionLogFile, { write: true, create: true, append: true });
+    this.currentLogFile = sessionLogFile;
+
+    // Create/update latest.log as a copy (since Deno doesn't support symlinks reliably)
+    try {
+      await this.createLatestLogSymlink(sessionLogFile, latestLogFile);
+    } catch (error) {
+      console.warn('[TelemetryService] Failed to create latest.log symlink:', error);
+    }
+
+    // Clean up old files if needed
+    await this.cleanupOldLogFiles();
+  }
+
+  /**
+   * Create latest.log symlink/copy pointing to current session log
+   */
+  private async createLatestLogSymlink(sessionLogFile: string, latestLogFile: string): Promise<void> {
+    try {
+      // Remove existing latest.log if it exists
+      try {
+        await Deno.remove(latestLogFile);
+      } catch (error) {
+        // Ignore if file doesn't exist
       }
 
-      // Open new file
-      this.logFileHandle = await Deno.open(newLogFile, { write: true, create: true, append: true });
+      // Create a simple text file that contains the current session log path
+      const latestContent = `# Current session log: ${sessionLogFile}\n# This file is updated on each server restart\n`;
+      await Deno.writeTextFile(latestLogFile, latestContent);
 
-      this.currentLogFile = newLogFile;
-
-      // Clean up old files if needed
-      await this.cleanupOldLogFiles();
+      console.log(`[TelemetryService] Updated latest.log to point to: ${sessionLogFile}`);
+    } catch (error) {
+      console.warn('[TelemetryService] Failed to update latest.log:', error);
     }
   }
 
@@ -621,7 +655,11 @@ export class TelemetryService {
     try {
       const files = [];
       for await (const dirEntry of Deno.readDir(this.config.fileExporter.directory)) {
-        if (dirEntry.isFile && dirEntry.name.startsWith('traces-') && dirEntry.name.endsWith('.jsonl')) {
+        // CRITICAL FIX: Match new session-based log file pattern (timestamp-sessionid.log)
+        // and exclude latest.log from cleanup
+        if (dirEntry.isFile &&
+            dirEntry.name.match(/^\d+-\w+\.log$/) &&
+            dirEntry.name !== 'latest.log') {
           const filePath = `${this.config.fileExporter.directory}/${dirEntry.name}`;
           const stat = await Deno.stat(filePath);
           const fileInfo = {
